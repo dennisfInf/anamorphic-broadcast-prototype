@@ -1,0 +1,177 @@
+Independent sampler audit, 2026-10-16
+===================================
+
+Reviewed implementation:
+  implementation/upstream/src/joint_dgs.rs
+  implementation/upstream/src/rbe.rs (setup, keygen, encryption coins)
+  implementation/extension/src/lib.rs (coin generation, family keys, capacity)
+
+This is a mathematical/code inspection of the specified distribution. It assumes
+correct MPFR directed-rounding semantics and independent uniform RNG words. The
+program uses a cryptographic RNG in practice; replacing ideal randomness with a
+CSPRNG entails its usual computational assumption. Variable timing and physical
+side channels are not covered.
+
+1. Ideal target and the exact distribution sampled
+------------------------------------------------
+For integer power-of-two width s, the target is
+  P_s(x) = exp(-pi*x^2/s^2) / Z_s, x in Z,
+  Z_s = sum_x exp(-pi*x^2/s^2).
+The s parameter is the Gaussian parameter, NOT its standard deviation. The
+continuous standard deviation is s/sqrt(2*pi). The selected widths are s=16 and
+s=2^36.
+
+The sampler restricts to T_s={-8s,...,8s}. For x=0 its unnormalized weight is
+exactly 1. For nonzero x it obtains an integer a_x satisfying
+  0 <= exp(-pi*x^2/s^2) - a_x/2^256 < 2^-255.
+Let v_x=a_x/2^256 and v_0=1. Both sampling paths return exactly the normalized
+weights v_x on T_s:
+
+- Large-width rejection samples a uniform proposal on T_s and accepts with
+  probability a_x/2^256, using the strict comparison U<a_x for a uniform
+  256-bit integer U. Zero is accepted with probability one. This realizes v_x
+  normalized by their sum; the number of rejected proposals does not multiply
+  the statistical error per returned Gaussian sample.
+- Small-width CDF builds integer weights a_0=2^256 and a_x for all other x,
+  cumulative sums and total W in five 64-bit limbs. It draws a uniformly masked
+  integer of bit length significant_bits(W), rejects values >=W, and finds the
+  first cumulative total strictly greater than the draw. This is exact uniform
+  integer sampling on [0,W), so its output law is precisely the same as the
+  rejection sampler. Repeated cumulative values (zero-mass outcomes), equality
+  boundaries and little-endian limb comparison are handled correctly.
+
+2. Interval arithmetic
+----------------------
+The accepted API domain has s a power of two in [16,2^48], with 8s<q/2. For every
+proposal |x|<=8s, x^2 has at most 103 bits. It is first computed as an exact
+Integer and then converted exactly to a 384-bit MPFR Float. Division by s^2 is
+an exact binary exponent shift. Thus the ratio x^2/s^2 is exact.
+
+pi_low and pi_high use downward and upward rounding. Multiplication by pi_high
+is rounded upward, then negated to form a lower bound on the exponent.
+Multiplication by pi_low is rounded downward, then negated to form an upper
+bound. Directed exp preserves those bounds. Multiplication by 2^256 is exact.
+Taking floors gives integer lo<=floor(2^256*w_x)<=hi. The code checks hi-lo<=1
+on every computed threshold and uses lo. Consequently the omitted probability
+is strictly less than 2/2^256. For x=0 it bypasses approximation and uses weight
+one. There is no f64 probability computation: the f64 input is used only to
+validate and transfer an exactly representable power-of-two width.
+
+At 384-bit precision the interval width is far below 1 after scaling by 2^256:
+the largest exponent magnitude is 64*pi<202, so the few directed-rounding
+errors at this precision cannot span two integers. The runtime check also
+prevents silently using any uncertified interval.
+
+3. Total variation distance of one returned scalar
+-------------------------------------------------
+Poisson summation gives Z_s>=s. The omitted Gaussian mass beyond 8s satisfies
+  sum_{|x|>8s} exp(-pi*x^2/s^2)
+    <= 2*integral_(8s)^infinity exp(-pi*t^2/s^2) dt
+    <= s*exp(-64*pi)/(8*pi).
+Define tau=exp(-64*pi)/(8*pi), whose base-two logarithm is about -294.72255.
+Thus the omitted probability is at most tau and the retained partition sum
+Z_T is at least s(1-tau).
+
+There are exactly 16s nonzero integer outcomes in T_s. Their total weight loss
+D is less than 16s*2^-255 = s*2^-251. Deleting nonnegative weights totaling D
+from an unnormalized distribution with sum Z_T and renormalizing changes its
+law in total variation by at most D/Z_T. (Write the original distribution as
+a mixture of the retained normalized law and the removed normalized law.)
+Therefore
+  SD(actual scalar, D_(Z,s))
+    <= tau + 2^-251/(1-tau)
+    < 2^-250.
+This bound holds equally for s=16 and s=2^36, and for the exact integer-CDF
+optimization. Modulo-q reduction cannot increase statistical distance.
+
+4. Full envelope accounting
+---------------------------
+At n=16, m_A=32, m_B=16, phi=256, depth ell<=162 and B=30, a ciphertext uses:
+  root and lower random vectors: phi*(ell+1)*n = 667,648 small samples;
+  root and internal errors:      phi*ell*3*m_A = 3,981,312 small samples;
+  leaf errors:                   phi*m_B       = 4,096 small samples;
+  message errors:                phi*B         = 7,680 large samples.
+Total: 4,653,056 small plus 7,680 large = 4,660,736 scalar samples.
+The present extension first samples all ordinary coins, including a root vector
+that it later replaces. Counting that discarded vector is conservative.
+
+For Q<=2^32 ciphertexts, two compared experiments incur at most
+  2*Q*4,660,736*(tau+2^-251/(1-tau)) < 2^-195.84.
+Using the simpler per-scalar upper bound 2^-250 gives <2^-194.84.
+This hybrid bound remains valid under adaptive ciphertext requests: each fresh
+conditional draw has the same uniform distance bound.
+
+Ordinary key generation samples bounded uniform secret and error coefficients
+on {-32767,...,32768}, exactly 65536 points: the inclusive draw 0,...,65535
+minus 32767 matches the source U(R_b)=(-b/2,b/2]. It does not sample Gaussian
+coefficients. Covert key generation likewise samples a bounded
+uniform box. Explicit public matrices and terminators are uniform. Thus the
+allowance of up to 2^30 ordinary user keys adds no Gaussian approximation terms.
+Do not multiply the Gaussian-sampler bound by the registration count.
+
+5. Uniform public setup and capacity checks
+-----------------------------------------
+The current PP type stores the two public matrices explicitly. Setup samples
+their NTT/CRT entries independently uniformly modulo q, which is equivalent to
+uniform coefficient matrices because the NTT is invertible. It samples each
+terminator uniformly in coefficient representation and transforms it. No public
+matrix-generating seed is exposed; hence the literal uniform-matrix assumption
+matches this setup, apart from the ordinary CSPRNG assumption above.
+
+Context creation rejects more than four group/payload-polynomial constraints.
+The final Family::generate guard requires exactly K=2^19. The four-constraint
+limit is enforced by context creation. The ordinary host rejects aggressive
+message compression, and encryption/decryption enforce the profile depth and
+root-compression bounds. Earlier unsafe parameter freedoms have been removed
+from the selected profile.
+
+Registration inputs in this implementation profile are outputs of the
+prescribed honest key generator, stored as precomputed negative gadget
+decompositions. The update interface does not validate the bounded coefficients
+of arbitrary externally supplied predecomposed public keys, so this profile
+does not implement the source's full untrusted raw-public-key interface.
+
+6. Ordinary leaf repair and eps=2^-208
+------------------------------------
+Use N_K<=2^30 honest-key queries, Q<=2^32 ciphertext challenges and H=163.
+The ordinary proof first replaces the N_K honest keys once globally. No
+honest secret key is exposed. At every challenge A1 requires distinct honest
+public-key values at occupied selected leaves for its identity. The
+restricted game rejects inadmissible challenges without conditioning key
+sampling. For ordinary privacy, registration and challenge identities lie in
+one prefix-free identity space. The low-level prototype does not enforce these preconditions. The channel proof uses honestly
+generated ordinary keys and may expose them; it never uses the leaf repair.
+
+The ordinary leaf embeds the complete key-response pool before the adaptive
+challenge is selected. Its rank-n Gaussian instance therefore uses
+m_plus=m_star+N_K module samples, conservatively padded from n+B+N_K.
+All other depth steps use m_star=126 samples. Let a_G and a_G_plus denote
+their respective Gaussian MLWE advantages at full reduction resources.
+Then each ordinary-message branch has
+
+  D_branch <= N_K*a_key + Q*(H-1)*a_G + Q*a_G_plus
+               + Q*(4H*eps/(1-eps)+16B*eps_c).
+
+Both branches reach a common hybrid with uniformized keys and uniform
+uncompressed ciphertexts, giving twice this bound. Compression maps both
+endpoints through the same codec. The H statistical coefficient counts
+one LLWE hop per depth, including the leaf; the key replacement contributes
+no LLWE statistical term. Details and source locations are in
+opus3-leaf-derivation.txt and parameter-security-audit.md.
+
+The leaf leakage is (F;0), with at most nB=480 nonzero entries. For
+m_plus=126+2^30, its smoothing lower bound is 10.440018513374458<12 and
+its LLWE left/right ratio is 0.9900673140023465<1. The generic 7nB bound
+would fail at this enlarged dimension. Non-leaf checks retain ratio
+0.961032457151613. All proofs use bar_sigma^2=(2^36)^2-16^2 and
+independent added width 16. No sampled width or ciphertext dimension changes.
+
+Ordinary-message statistical loss remains about 2^-164.8553; channel
+mode/message statistical loss remains about 2^-166.0811. Under A1 and the
+explicit 2^-192 advantage hypothesis for every primitive, including a_G_plus
+at its enlarged sample count and full resources, ordinary message privacy
+has log2 bound -151.64890817967904. The sum of the separate privacy,
+correctness and conservative sampler bounds has log2 -151.63121381410429.
+These values assume ideal random words. A separate aggregate CSPRNG term is
+needed for implementation use; estimated attack costs do not supply either
+this term or the primitive-advantage hypothesis.

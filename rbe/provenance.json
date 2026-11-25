@@ -1,0 +1,117 @@
+{
+  "source_repository": "https://github.com/jnsiemer/scalable_rbe_prototype",
+  "source_commit": "5f1e7416893de7950d231f11b1207dd5bc02924d",
+  "license": "MPL-2.0",
+  "processor": "Apple M4",
+  "os": "macOS 27.0.1 (26A434)",
+  "rustc": "1.96.1",
+  "cargo": "1.96.1",
+  "date": "2026-10-17",
+  "rayon_threads": 1,
+  "parameter_profile": "selected-profile.json",
+  "source_patch": "implementation/upstream.patch",
+  "review_revision_patch": "../../research/audits/snapshots/review-fixes-2026-10-17/rbe/implementation/review-fixes.patch",
+  "previous_provenance": "../../research/audits/snapshots/review-fixes-2026-10-17/rbe/historical-results-2026-10-16/provenance.json",
+  "historical_results": "../../research/audits/snapshots/review-fixes-2026-10-17/rbe/historical-results-2026-10-16",
+  "sha256": {
+    "implementation/extension/Cargo.lock": "63edb3b58bdd274a7ea6145e7a62ad1560bee9adb4b98ae42bccc9d945b6fc45",
+    "implementation/extension/Cargo.toml": "59b105e2e4fb15005f9a7e7dfd7b19642fb3bbf87a675e5152d8a0c659c0901f",
+    "implementation/extension/src/lib.rs": "aae10b9e12326771d0b224a2976ca56af526fbd2faefab6db76ec33dbd117a22",
+    "implementation/extension/src/main.rs": "41b8bfe6667d5b8d1cd62c39ab6b04ecdb170df51a91942feec7290677ab725d",
+    "implementation/extension/tests/audit.rs": "03857e53d7d57fa7bff9148880cf33de01fdb89c9349a2035470764538c0397c",
+    "implementation/extension/tests/integration.rs": "f3f8cea6c27d6b8c8cf603082257d1b078178443443b7af1c1530ec75e480702",
+    "implementation/extension/tests/opus3_duplicate_key.rs": "cce8c89c1a92dca7024892476f8fb95279a320ab1299d8a352639aca6ed5486e",
+    "implementation/upstream/Cargo.lock": "58ea2bc869b8c3f53adb7b4de8ae4cf1489a29157b1a9eeb0a318b2282f6ab42",
+    "implementation/upstream/Cargo.toml": "89e1b3de876626e518de7a3772523b921cd7dcc923a2c0dcec4ed9c8e5ea32f5",
+    "implementation/upstream/benches/benchmarks.rs": "acaa299c765a59659185f5b2cbe1298dee62d905fd49e10c06d03a664cdcaa2c",
+    "implementation/upstream/benches/rbe.rs": "fcd21155a6cd6c750f053aa469f3b8308e6a6109cce62bfc50cfbf186fb38910",
+    "implementation/upstream/src/dgs.rs": "3d6ec440531806c6f4ec8767d6b674e42d1a8c8bc18f8cef5e23367ec3862444",
+    "implementation/upstream/src/joint_dgs.rs": "67a5a4dd3272fb5ac4d40b04ab7a2ea64b2e7f9d50fd7fd34b4df825cd21954d",
+    "implementation/upstream/src/lib.rs": "d411b56ffd7830c2ce93c0d3eee1ce98197c531fea0b1c1aa20e44342ffe658d",
+    "implementation/upstream/src/mat.rs": "2b128620525fbc443f19e1d991d8a0d8e9c8324f233cf427b4390ff35f8ff353",
+    "implementation/upstream/src/ntt.rs": "e1171df4ac7e4b800c31238cb9588f51282a4f60f3018444ee304fbb26a8ce11",
+    "implementation/upstream/src/rbe.rs": "9935ffae803734762976b42c60260ec089cedcc5788e3fe0018e1bf884d027e5",
+    "implementation/upstream/src/utils.rs": "7fc1d69d534f1e47df77f12a80c8ca4fd4e143ea65b7fa1e29f6dcf3542b69dd"
+  },
+  "benchmark_source_sha256": {
+    "implementation/extension/Cargo.lock": "63edb3b58bdd274a7ea6145e7a62ad1560bee9adb4b98ae42bccc9d945b6fc45",
+    "implementation/extension/Cargo.toml": "59b105e2e4fb15005f9a7e7dfd7b19642fb3bbf87a675e5152d8a0c659c0901f",
+    "implementation/extension/src/lib.rs": "aae10b9e12326771d0b224a2976ca56af526fbd2faefab6db76ec33dbd117a22",
+    "implementation/extension/src/main.rs": "41b8bfe6667d5b8d1cd62c39ab6b04ecdb170df51a91942feec7290677ab725d",
+    "implementation/extension/tests/audit.rs": "03857e53d7d57fa7bff9148880cf33de01fdb89c9349a2035470764538c0397c",
+    "implementation/extension/tests/integration.rs": "f3f8cea6c27d6b8c8cf603082257d1b078178443443b7af1c1530ec75e480702",
+    "implementation/extension/tests/opus3_duplicate_key.rs": "cce8c89c1a92dca7024892476f8fb95279a320ab1299d8a352639aca6ed5486e",
+    "implementation/upstream/Cargo.lock": "58ea2bc869b8c3f53adb7b4de8ae4cf1489a29157b1a9eeb0a318b2282f6ab42",
+    "implementation/upstream/Cargo.toml": "89e1b3de876626e518de7a3772523b921cd7dcc923a2c0dcec4ed9c8e5ea32f5",
+    "implementation/upstream/benches/benchmarks.rs": "acaa299c765a59659185f5b2cbe1298dee62d905fd49e10c06d03a664cdcaa2c",
+    "implementation/upstream/benches/rbe.rs": "fcd21155a6cd6c750f053aa469f3b8308e6a6109cce62bfc50cfbf186fb38910",
+    "implementation/upstream/src/dgs.rs": "3d6ec440531806c6f4ec8767d6b674e42d1a8c8bc18f8cef5e23367ec3862444",
+    "implementation/upstream/src/joint_dgs.rs": "67a5a4dd3272fb5ac4d40b04ab7a2ea64b2e7f9d50fd7fd34b4df825cd21954d",
+    "implementation/upstream/src/lib.rs": "d411b56ffd7830c2ce93c0d3eee1ce98197c531fea0b1c1aa20e44342ffe658d",
+    "implementation/upstream/src/mat.rs": "2b128620525fbc443f19e1d991d8a0d8e9c8324f233cf427b4390ff35f8ff353",
+    "implementation/upstream/src/ntt.rs": "e1171df4ac7e4b800c31238cb9588f51282a4f60f3018444ee304fbb26a8ce11",
+    "implementation/upstream/src/rbe.rs": "9935ffae803734762976b42c60260ec089cedcc5788e3fe0018e1bf884d027e5",
+    "implementation/upstream/src/utils.rs": "7fc1d69d534f1e47df77f12a80c8ca4fd4e143ea65b7fa1e29f6dcf3542b69dd"
+  },
+  "benchmark_binary_sha256": "17777549b088b6f09bb8f41cae0b546a16b7e7f8d291ebd26e13401d9515d6a9",
+  "benchmark_record": "results/review-fixes-benchmark-provenance.json",
+  "benchmark_source_note": "Fresh 300 measured ciphertext executions from the current corrected source. Source hashes captured before the run and verified unchanged afterwards. One omitted warm-up pair per workload.",
+  "benchmark_counts": {
+    "measured_ciphertexts": 300,
+    "ordinary_mode": 150,
+    "anamorphic_mode": 150,
+    "ordinary_recovery_failures": 0,
+    "intended_group_recovery_failures": 0
+  },
+  "tests": {
+    "upstream": {
+      "log": "results/review-fixes-upstream-tests.log",
+      "passed": 28,
+      "ignored": 1,
+      "doctests_passed": 1
+    },
+    "extension": {
+      "log": "results/review-fixes-extension-tests.log",
+      "integration_tests_passed": 3,
+      "audit_tests_passed": 3,
+      "duplicate_key_tests_passed": 1,
+      "manual_diagnostic_ignored": 1
+    },
+    "strict_extension_clippy": {
+      "log": "results/review-fixes-clippy.log",
+      "passed": true
+    }
+  },
+  "scope": "Modified low-level BLE plus affine channel under the explicitly stated honest-registration and separate privacy-game restrictions. Full source wrapper/merging, arbitrary external-key validation, side-channel hardening and numerical CSPRNG advantage are not implemented or established.",
+  "integration_raw_record_note": "results/integration.log and functional.csv retain their earlier recorded source provenance. Current corrected-source full test execution is separately recorded in review-fixes-extension-tests.log. The unchanged integration loop includes 60 ordinary controls plus 60 anamorphic ciphertexts.",
+  "benchmark_result_sha256": {
+    "results/benchmark-depth16-group2-L256-branch1.csv": "5ee035a4e2bf44c7591ee535ea2bd61259a9a037235ef55f33eede1b3a17f274",
+    "results/benchmark-depth16-group2-L256-branch1.log": "270b3ebbd9dcedacd1a3939bb9e7b80ac514338ebc11fdd5bbd7271d1686be6d",
+    "results/benchmark-depth162-group1-L1024-branch0.csv": "45a52c489fe820cf156417332e8fbc1fbbba711fdfc50c602da988ceef92d813",
+    "results/benchmark-depth162-group1-L1024-branch0.log": "c0042efb2fee3c8d678a2e032df2fe8856d300f1d95c58035772ccc4407753f6",
+    "results/benchmark-depth162-group2-L256-branch0.csv": "57e556389a4c6954b051943e5fd42358bcde6664b7ccb88b3eff40f4de185983",
+    "results/benchmark-depth162-group2-L256-branch0.log": "53169b06c8b19914d3409ee1c1e774f4c62049e4d0183680048bc6b1ca1100b0",
+    "results/benchmark-depth162-group2-L512-branch1.csv": "17f33cc8abfdc0e2d51b45df78c05ec565d17f4a53a55b5afe2a39c9106c50f1",
+    "results/benchmark-depth162-group2-L512-branch1.log": "b19bdeecf92676509dcf45bb31eaf1b50ba828553121bab170fdc272f877f821",
+    "results/benchmark-depth162-group4-L256-branch2.csv": "232afd0f07863b3c4a63184fa99698b37ce0b72b59cfe4fc32b76e8e0612af0d",
+    "results/benchmark-depth162-group4-L256-branch2.log": "b092a4b50f6870e3765def293df389298e3159a2ab1afa37260dbf5b693c4857",
+    "results/benchmark-run.log": "af9e01ee5a70e5b4c0d771b5d0dcc2b9d57bef4601207082a2b01505fd1d5d65"
+  },
+  "summary_sha256": {
+    "results/summary.csv": "add30dcd985d1a1fbcb143a75f20f94e26d81d35e932aa5663b9210f533f4e62",
+    "results/summary.json": "bf6721de89c733e3b73976b0fead3a982dc8217248099737d2d20cf53a46c62e"
+  },
+  "relocation": {
+    "date": "2026-10-18",
+    "note": "Paths adjusted for project organization; cryptographic sources and original measurement hashes unchanged.",
+    "frozen_archive": "../../research/audits/snapshots/review-fixes-2026-10-17-epoque-implementation.zip",
+    "frozen_archive_sha256": "8d5efe7e950c58423afbaf663e1e7f031aa6918c0415e9cbe0612f76a4cfb02b"
+  },
+  "relocated_evidence": {
+    "results/": "../../research/history/experiments/implementation-results/rbe/results/",
+    "estimator/": "../../research/history/experiments/implementation-results/rbe/estimator/",
+    "correctness/live-code-alignment.json": "../../research/history/experiments/implementation-results/rbe/correctness/live-code-alignment.json",
+    "security/initial-state-audit.txt": "../../research/history/experiments/implementation-results/rbe/security/initial-state-audit.txt"
+  },
+  "relocation_note": "Recorded hashes identify the original measurement sources. Paths listed in relocated_evidence now resolve through that mapping; later path-only edits to tools do not rebind the original measurements."
+}

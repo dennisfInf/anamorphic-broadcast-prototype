@@ -1,0 +1,86 @@
+Current scope of the joint RBE/anamorphic profile
+================================================
+
+The selected profile uses phi=256, q=281474976694273, n=16, B=30,
+m_A=32, m_B=16, m_C=64, m_star=126, b=65536, sigma=16,
+sigma_tilde=2^36, proof width sigma_star=12, covert-key width K=2^19,
+root13/other8 compression, and eps=eps_c=2^-208. Encryption accepts
+nonempty identities of depth at most 162 and enforces 1<=g=|S|ceil(L/256)<=4.
+The caps are Q<=2^32 ciphertext queries and N_K<=2^30 honest-key queries.
+B bounds the registered population but does not itself cap oracle calls.
+
+Channel mode/message privacy covers one family with the intended group,
+first identity branch and payload length fixed before setup. Ordinary keys
+are honestly generated and may be exposed, as may covert keys outside the
+target group. Intended covert keys and sender coins remain private. Each
+ciphertext uses fresh independent randomness. Additional-family key exposure
+and adaptive changes of these fixed choices are outside this theorem.
+
+Ordinary-message privacy has a separate scope. No honest secret key is
+revealed. At every challenge, A1 requires pairwise distinct honest public-key
+values at occupied selected leaves for its identity (raw vectors in the paper;
+canonical prescribed encodings in this prototype). The restricted game
+rejects inadmissible challenges in every hybrid. Setup and key generation
+remain unconditioned, including accidental sample collisions. Canonically
+mapping a value to its first oracle occurrence gives distinct selected pool
+indices. A manager maintaining one subregistry per identity satisfies A1.
+The low-level prototype accepts caller-chosen subregistries and does not
+enforce that invariant or A1. Its duplicate-key regression demonstrates the
+failure of the unrestricted independent-uniform endpoint and leakage of
+per-slot message differences. It does not distinguish the common message.
+
+For ordinary privacy, registration and challenge identities belong to one
+prefix-free identity space; fixed-length encodings suffice. Registered-only prefix-freeness does
+not ensure the required key-or-terminator final nodes for arbitrary challenge
+identities. This is an ordinary-game precondition, not an API validation claim or a new
+restriction on the root-only channel games.
+
+Under these respective game conditions, the ideal-distribution bounds are
+  Adv_mode <= Q*(a_n+a_(n-g)) + delta_mode,
+  Adv_am <= 2Q*a_(n-g) + delta_mode,
+  Adv_ordinary <= 2N_K*a_key + 2Q*(H-1)*a_G + 2Q*a_G_plus
+                  + delta_ordinary,  H=163.
+The bounded-key law is U{-32767,...,32768}. Gaussian challenges have
+secret/error D_(R,12). The channel and non-leaf instances use 126 module
+samples at the stated ranks. The rank 16 ordinary leaf embeds all honest
+key responses and uses at most 126+N_K module samples. Each advantage is
+evaluated at the complete reduction resources, including the larger key pool
+and transcript simulation. Transferring ordinary privacy to anamorphic mode
+also retains the intended-covert-key restriction of the mode game.
+
+The enlarged leaf has secret-only leakage with weight nB=480. Its LLWE
+ratio is 0.9900673140023465 and smoothing lower bound is 10.440018513374458<12.
+The old generic weight 7nB fails at this sample count and is not used for the
+leaf. Encryption parameters, root channel assumptions and statistical losses
+are unchanged. See opus3-leaf-derivation.txt and opus3-leaf-checks.json.
+
+The prior numerical sum remains below 2^-151 under A1 and the explicit
+hypothesis that every relevant primitive advantage, including a_G_plus, is
+at most 2^-192 at full reduction resources, with ideal independent randomness.
+This is a sum of separate game and correctness bounds. Estimated attack costs
+do not establish that primitive-advantage hypothesis. The implementation
+requires an additional aggregate CSPRNG distinguishing term, not numerically
+bounded here. Sampler approximation is accounted for separately.
+
+Known-attack estimates use the scalarized module-LWE convention and chosen
+Core-SVP models. The enlarged leaf has minimum completed finite costs of
+316.236 classical and 286.995 quantum Core-SVP bits; coded-BKW fails
+numerically and remains an evidence gap. The completed 126-sample rank 12 suite gives 219.0 classical
+and 198.75 quantum bits. Enlarged-leaf coverage is recorded separately in
+../../../research/history/experiments/implementation-results/rbe/results/opus3-leaf-estimator.json. Its execution status and omitted attacks
+must accompany its numbers; the rank 12 result is not evidence for the larger
+leaf sample count.
+
+Registration inputs are prescribed honest key-generator outputs stored as
+precomputed negative gadget decompositions. The API does not validate
+arbitrary externally supplied predecomposed public keys. Its registry
+operations assume prefix-free identities and do not implement the source
+wrapper's complete merging lifecycle. The population capacity comes from
+the source construction, not a 2^30-user deployment test. The code is a
+variable-time research prototype. Its initial empty-registry state is repaired
+and tested as recorded in initial-state-audit.txt.
+
+The third audit supplied the leaf findings. Its original report is preserved in
+../../../research/audits/snapshots/review-fixes-2026-10-17/rbe/historical-audits-2026-10-16/OPUS-THIRD-RESOLUTION.txt and describes that
+earlier package. The present revision and execution checks are recorded in
+../../../research/audits/snapshots/review-fixes-2026-10-17/rbe/RBE-CHANGES.txt and ../../../research/history/experiments/implementation-results/rbe/results/review-fixes-*.log.

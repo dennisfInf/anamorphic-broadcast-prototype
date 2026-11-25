@@ -1,0 +1,9 @@
+# Keeps local build output, scratch databases and run results out of the image.
+**/target/
+**/registry_db/
+**/__pycache__/
+*.py[cod]
+.venv/
+.runtime/
+.git/
+results/

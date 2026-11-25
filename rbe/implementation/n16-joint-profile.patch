@@ -1,0 +1,1454 @@
+# Reproduces the rank-16 'joint profile' host (the paper's Sec. 7.2) vendored in
+# upstream/. Apply in a clone of
+# https://github.com/jnsiemer/scalable_rbe_prototype at 5f1e7416893de7950d231f11b1207dd5bc02924d:
+#   git apply n16-joint-profile.patch
+# (the earlier upstream.patch plus the later review fixes; Cargo.lock omitted,
+# the vendored upstream/Cargo.lock pins the dependencies). build.rs sets the module
+# rank from RBE_RANK (default 16). RBE_RANK=7 restores the authors' N = 7 and
+# PRUNE_CT_BY = 16, with SIGMA_TILDE rounded to 2^35.
+diff --git a/Cargo.toml b/Cargo.toml
+index b82d03e..2cb29b5 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -18,12 +18,17 @@ exclude = [
+ ]
+ 
+ [dependencies]
+-rand = "0.10"
++rand = { version = "0.10", features = ["unbiased"] }
+ criterion = { version = "0.8", features = ["html_reports"] }
+ rayon = "1.11.0"
+ concrete-ntt = "0.2.0"
+ rand_distr = "0.6"
+ sled = "0.34.7"
++rug = { version = "1.30", default-features = false, features = ["float", "integer", "std"] }
++
++# The module rank comes from the RBE_RANK environment variable at build time (build.rs):
++# 16 by default (the joint profile), 7 for the authors' benchmark parameters, 8 to 15 for
++# hosts that keep the authors' rank 7 free after up to RBE_RANK - 7 constraints.
+ 
+ [profile.bench]
+ debug = true
+diff --git a/benches/rbe.rs b/benches/rbe.rs
+index eca3e62..6335413 100644
+--- a/benches/rbe.rs
++++ b/benches/rbe.rs
+@@ -7,6 +7,7 @@
+ // Mozilla Foundation. See <https://mozilla.org/en-US/MPL/2.0/>.
+ 
+ //! Contains benchmarks for the Registration-Based Encryption scheme.
++//! Run in a disposable working directory: these benchmarks clear `registry_db`.
+ 
+ use criterion::{Criterion, criterion_group};
+ use rand::{RngExt as _, distr::Uniform, rng};
+@@ -24,9 +25,13 @@ use scalable_rbe::{
+ /// - `cargo bench --bench benchmarks Single\ Setup`
+ /// - `cargo flamegraph --bench benchmarks -- --bench Single\ Setup`
+ fn bench_setup(c: &mut Criterion) {
++    drop_db();
+     let rbe = RBE::init(false);
+ 
+-    c.bench_function("Single Setup", |b| b.iter(|| rbe.setup()));
++    c.bench_function("Single Setup", |b| {
++        // Each output is dropped before the next cleanup; neither is timed.
++        b.iter_batched(drop_db, |_| rbe.setup(), criterion::BatchSize::PerIteration)
++    });
+ 
+     drop_db();
+ }
+@@ -38,11 +43,13 @@ fn bench_setup(c: &mut Criterion) {
+ /// - `cargo bench --bench benchmarks Single\ KeyGen`
+ /// - `cargo flamegraph --bench benchmarks -- --bench Single\ KeyGen`
+ fn bench_keygen(c: &mut Criterion) {
++    drop_db();
+     let rbe = RBE::init(false);
+-    let (pp, _st, mut _reg) = rbe.setup();
++    let (pp, _st, reg) = rbe.setup();
+ 
+     c.bench_function("Single KeyGen", |b| b.iter(|| rbe.keygen(&pp)));
+ 
++    drop(reg);
+     drop_db();
+ }
+ 
+@@ -53,6 +60,7 @@ fn bench_keygen(c: &mut Criterion) {
+ /// - `cargo bench --bench benchmarks Single\ Update`
+ /// - `cargo flamegraph --bench benchmarks -- --bench Single\ Update`
+ fn bench_update(c: &mut Criterion) {
++    drop_db();
+     let rbe = RBE::init(false);
+     let (pp, _st, mut reg) = rbe.setup();
+     let (pk, _sk) = rbe.keygen(&pp);
+@@ -61,6 +69,7 @@ fn bench_update(c: &mut Criterion) {
+         b.iter(|| rbe.update(&mut reg, &pp, 0, &"0".repeat(162), &pk))
+     });
+ 
++    drop(reg);
+     drop_db();
+ }
+ 
+@@ -71,6 +80,7 @@ fn bench_update(c: &mut Criterion) {
+ /// - `cargo bench --bench benchmarks Single\ Enc`
+ /// - `cargo flamegraph --bench benchmarks -- --bench Single\ Enc`
+ fn bench_enc(c: &mut Criterion) {
++    drop_db();
+     let id = "0".repeat(162);
+ 
+     let rbe = RBE::init(false);
+@@ -84,6 +94,7 @@ fn bench_enc(c: &mut Criterion) {
+         b.iter(|| rbe.enc(&pp, &st, &id, vec_m_t.clone()))
+     });
+ 
++    drop(reg);
+     drop_db();
+ }
+ 
+@@ -94,6 +105,7 @@ fn bench_enc(c: &mut Criterion) {
+ /// - `cargo bench --bench benchmarks Single\ Enc\ without\ randomness`
+ /// - `cargo flamegraph --bench benchmarks -- --bench Single\ Enc\ without\ randomness`
+ fn bench_enc_wo_randomness(c: &mut Criterion) {
++    drop_db();
+     let id = "0".repeat(162);
+     let l = id.len();
+ 
+@@ -143,6 +155,7 @@ fn bench_enc_wo_randomness(c: &mut Criterion) {
+         })
+     });
+ 
++    drop(reg);
+     drop_db();
+ }
+ 
+@@ -153,6 +166,7 @@ fn bench_enc_wo_randomness(c: &mut Criterion) {
+ /// - `cargo bench --bench benchmarks Single\ Witness\ Gen`
+ /// - `cargo flamegraph --bench benchmarks -- --bench Single\ Witness\ Gen`
+ fn bench_witness_gen(c: &mut Criterion) {
++    drop_db();
+     let id = "0".repeat(162);
+ 
+     let rbe = RBE::init(false);
+@@ -164,6 +178,7 @@ fn bench_witness_gen(c: &mut Criterion) {
+         b.iter(|| rbe.witness_gen(&reg, 0, &id))
+     });
+ 
++    drop(reg);
+     drop_db();
+ }
+ 
+@@ -174,6 +189,7 @@ fn bench_witness_gen(c: &mut Criterion) {
+ /// - `cargo bench --bench benchmarks Single\ Dec`
+ /// - `cargo flamegraph --bench benchmarks -- --bench Single\ Dec`
+ fn bench_dec(c: &mut Criterion) {
++    drop_db();
+     let id = "0".repeat(162);
+ 
+     let rbe = RBE::init(false);
+@@ -188,6 +204,7 @@ fn bench_dec(c: &mut Criterion) {
+ 
+     c.bench_function("Single Dec", |b| b.iter(|| rbe.dec(&sk, 0, &wit, &ct)));
+ 
++    drop(reg);
+     drop_db();
+ }
+ 
+@@ -197,12 +214,17 @@ fn bench_dec(c: &mut Criterion) {
+ /// - `cargo criterion RBE`
+ /// - `cargo bench --bench benchmarks RBE`
+ fn bench_all(c: &mut Criterion) {
++    drop_db();
+     let rbe = RBE::init(false);
+ 
+     // Benchmark setup
+-    c.bench_function("RBE Setup", |b| b.iter(|| rbe.setup()));
++    c.bench_function("RBE Setup", |b| {
++        // Each output is dropped before the next cleanup; neither is timed.
++        b.iter_batched(drop_db, |_| rbe.setup(), criterion::BatchSize::PerIteration)
++    });
+ 
+     // Setup to continue with
++    drop_db();
+     let (pp, _st, mut reg) = rbe.setup();
+ 
+     // Benchmark keygen
+@@ -228,6 +250,12 @@ fn bench_all(c: &mut Criterion) {
+         )
+     });
+ 
++    // A filtered run may skip updates and use one fixture identity.
++    // Unfiltered runs retain the population produced by the update benchmark.
++    if ids.is_empty() {
++        ids.push("0".repeat(162));
++    }
++
+     // Get current state
+     let st = rbe.update(&mut reg, &pp, 0, &ids[0], &pk);
+ 
+@@ -259,6 +287,7 @@ fn bench_all(c: &mut Criterion) {
+     c.bench_function("RBE Dec", |b| b.iter(|| rbe.dec(&sk, 0, &wit, &ct)));
+ 
+     // Clear registry database
++    drop(reg);
+     drop_db();
+ }
+ 
+diff --git a/b/build.rs b/build.rs
+new file mode 100644
+index 0000000..176a4da
+--- /dev/null
++++ b/build.rs
+@@ -0,0 +1,31 @@
++//! Sets the host's module rank from RBE_RANK at build time (default 16, the joint
++//! profile). Rank 7 restores the authors' benchmark parameters. Ranks 8 to 15 use the
++//! joint profile's pruning and noise width, which it checks at the larger rank 16.
++use std::{env, fs, path::Path};
++
++fn main() {
++    println!("cargo:rerun-if-env-changed=RBE_RANK");
++    let rank: usize = match env::var("RBE_RANK") {
++        Ok(value) => value.trim().parse().expect("RBE_RANK must be an integer"),
++        Err(_) => 16,
++    };
++    assert!((7..=16).contains(&rank), "RBE_RANK must lie between 7 and 16");
++    // The authors' PRUNE_CT_BY and SIGMA_TILDE (33_519_950_000, rounded to the power of
++    // two 2^35 that the joint sampler needs) at rank 7, the joint profile's otherwise.
++    let (prune, sigma_tilde) = if rank == 7 {
++        (16, "34_359_738_368.0")
++    } else {
++        (8, "68_719_476_736.0")
++    };
++    let code = format!(
++        "/// Defines the matrix height of `A` and `B` among other vectors (RBE_RANK at build\n\
++         /// time: 16 for the joint profile, 7 for the authors' benchmark host).\n\
++         pub const N: usize = {rank};\n\
++         /// Bits dropped from each non-root ciphertext coefficient.\n\
++         pub const PRUNE_CT_BY: usize = {prune};\n\
++         /// Width of the message-error law in the same Gaussian convention.\n\
++         pub const SIGMA_TILDE: f64 = {sigma_tilde};\n"
++    );
++    let path = Path::new(&env::var("OUT_DIR").expect("OUT_DIR")).join("profile.rs");
++    fs::write(path, code).expect("write the profile constants");
++}
+diff --git a/src/dgs.rs b/src/dgs.rs
+index 8b87ce7..3e3ac73 100644
+--- a/src/dgs.rs
++++ b/src/dgs.rs
+@@ -57,6 +57,21 @@ pub struct RejSampler {
+     pub table: Vec<u32>,
+ }
+ 
++impl RejSampler {
++    // Share the production loop with seeded histogram fixtures.
++    fn sample_with_rng<R: Rng + ?Sized>(&self, rng: &mut R) -> u64 {
++        loop {
++            let x = self.dist.sample(rng);
++            let evaluated_gauss_f = self.table[x as usize];
++            if evaluated_gauss_f >= rng.next_u32() {
++                let (r, underflow) = (x % self.mod_q).overflowing_sub(self.tmp_center);
++                let a = r.wrapping_add((underflow as u64) * self.mod_q);
++                return a;
++            }
++        }
++    }
++}
++
+ /// Evaluates the Gaussian function for value `x` and Gaussian parameter `s`.
+ ///
+ /// Parameters:
+@@ -102,15 +117,7 @@ impl DGS for RejSampler {
+     /// Parameters:
+     /// - `rng`: A [`ThreadRng`] to generate randomness
+     fn sample(&self, rng: &mut ThreadRng) -> u64 {
+-        loop {
+-            let x = self.dist.sample(rng);
+-            let evaluated_gauss_f = self.table[x as usize];
+-            if evaluated_gauss_f >= rng.next_u32() {
+-                let (r, underflow) = (x % self.mod_q).overflowing_sub(self.tmp_center);
+-                let a = r.wrapping_add((underflow as u64) * self.mod_q);
+-                return a;
+-            }
+-        }
++        self.sample_with_rng(rng)
+     }
+ }
+ 
+@@ -416,7 +423,7 @@ pub fn sample_binomial(n: usize, mod_q: i64, rng: &mut ThreadRng) -> u64 {
+ #[cfg(test)]
+ mod test_rej {
+     use crate::dgs::{DGS, RejSampler};
+-    use rand::rng;
++    use rand::{SeedableRng, rng, rngs::StdRng};
+ 
+     #[test]
+     fn in_bounds() {
+@@ -431,10 +438,11 @@ mod test_rej {
+     #[test]
+     fn rough_dist_mini() {
+         let dgs = RejSampler::init(3.0, 13);
++        let mut fixture_rng = StdRng::seed_from_u64(0);
+ 
+         let mut vector = vec![0; 13];
+         for _ in 0..100_000 {
+-            let x = dgs.sample(&mut rng());
++            let x = dgs.sample_with_rng(&mut fixture_rng);
+             vector[x as usize] += 1;
+         }
+ 
+@@ -464,10 +472,11 @@ mod test_rej {
+     #[test]
+     fn rough_dist_small() {
+         let dgs = RejSampler::init(64.0, 257);
++        let mut fixture_rng = StdRng::seed_from_u64(0);
+ 
+         let mut vector = vec![0; 257];
+         for _ in 0..1_000_000 {
+-            let x = dgs.sample(&mut rng());
++            let x = dgs.sample_with_rng(&mut fixture_rng);
+             vector[x as usize] += 1;
+         }
+ 
+@@ -509,7 +518,7 @@ mod test_rej {
+ #[cfg(test)]
+ mod test_cdf {
+     use crate::dgs::{CdfSampler, DGS};
+-    use rand::rng;
++    use rand::{SeedableRng, rng, rngs::StdRng};
+ 
+     #[test]
+     fn in_bounds() {
+@@ -524,10 +533,12 @@ mod test_cdf {
+     #[test]
+     fn rough_dist_mini() {
+         let dgs = CdfSampler::init(3.0, 13);
++        // Fix the histogram fixture; fresh randomness can fail fixed tail-count intervals.
++        let mut fixture_rng = StdRng::seed_from_u64(0);
+ 
+         let mut vector = vec![0; 13];
+         for _ in 0..100_000 {
+-            let x = dgs.sample(&mut rng());
++            let x = dgs.sample_i64(&mut fixture_rng).rem_euclid(13);
+             vector[x as usize] += 1;
+         }
+ 
+@@ -557,10 +568,11 @@ mod test_cdf {
+     #[test]
+     fn rough_dist_small() {
+         let dgs = CdfSampler::init(64.0, 257);
++        let mut fixture_rng = StdRng::seed_from_u64(0);
+ 
+         let mut vector = vec![0; 257];
+         for _ in 0..1_000_000 {
+-            let x = dgs.sample(&mut rng());
++            let x = dgs.sample_i64(&mut fixture_rng).rem_euclid(257);
+             vector[x as usize] += 1;
+         }
+ 
+diff --git a/b/src/joint_dgs.rs b/src/joint_dgs.rs
+new file mode 100644
+index 0000000..e87e547
+--- /dev/null
++++ b/src/joint_dgs.rs
+@@ -0,0 +1,283 @@
++// SPDX-License-Identifier: MPL-2.0
++//! Reference Gaussian sampler for the joint parameter profile.
++//!
++//! Targets D_{Z,s}(x) proportional to exp(-pi*(x/s)^2), with integer power-of-two
++//! s, truncation at 8s, and downward-certified 256-bit acceptance probabilities.
++//! The width s is a Gaussian parameter, not its standard deviation. Small widths
++//! use an integer CDF; large widths use rejection with the same integer masses.
++//!
++//! This is variable-time research code. The distance bound is in the package
++//! file `security/sampler-analysis.txt`; the sampler is not side-channel hardened.
++use crate::dgs::DGS;
++use rand::{
++    Rng,
++    distr::{Distribution, Uniform},
++    rngs::ThreadRng,
++};
++use rug::{
++    Float, Integer,
++    float::{Constant, Round},
++    integer::Order,
++};
++
++const PRECISION: u32 = 384;
++const PROB_BITS: u32 = 256;
++
++// The zero point has mass 2^256, which does not fit in four limbs.
++#[derive(Clone, Debug, PartialEq, Eq)]
++enum Threshold {
++    Always,
++    Fixed([u64; 4]),
++}
++
++// The sum of the 256-bit masses needs a fifth limb.
++#[derive(Clone, Debug)]
++struct IntegerCdf {
++    cumulative: Vec<[u64; 5]>,
++    total: [u64; 5],
++    high_mask: u64,
++}
++
++fn limbs5(value: &Integer) -> [u64; 5] {
++    let digits = value.to_digits::<u64>(Order::Lsf);
++    assert!(digits.len() <= 5);
++    let mut limbs = [0; 5];
++    limbs[..digits.len()].copy_from_slice(&digits);
++    limbs
++}
++
++fn less5(a: &[u64; 5], b: &[u64; 5]) -> bool {
++    for j in (0..5).rev() {
++        if a[j] < b[j] {
++            return true;
++        }
++        if a[j] > b[j] {
++            return false;
++        }
++    }
++    false
++}
++
++#[derive(Clone, Debug)]
++pub struct JointGaussian {
++    width: u64,
++    modulus: u64,
++    cutoff: u64,
++    proposal: Uniform<u64>,
++    cdf: Option<IntegerCdf>,
++    pi_low: Float,
++    pi_high: Float,
++}
++
++impl JointGaussian {
++    fn bounds(&self, abs_x: u64) -> (Integer, Integer) {
++        // x^2 and division by s^2 are exact at this precision for the accepted
++        // parameter domain. Only pi, its product, and exp need rounding bounds.
++        let square = Integer::from(abs_x) * Integer::from(abs_x);
++        let mut ratio = Float::with_val(PRECISION, square);
++        ratio >>= 2 * self.width.trailing_zeros();
++        let mut low = -Float::with_val_round(PRECISION, &ratio * &self.pi_high, Round::Up).0;
++        let mut high = -Float::with_val_round(PRECISION, &ratio * &self.pi_low, Round::Down).0;
++        low.exp_round(Round::Down);
++        high.exp_round(Round::Up);
++        low <<= PROB_BITS;
++        high <<= PROB_BITS;
++        (
++            low.to_integer_round(Round::Down).unwrap().0,
++            high.to_integer_round(Round::Down).unwrap().0,
++        )
++    }
++
++    fn threshold(&self, abs_x: u64) -> Threshold {
++        if abs_x == 0 {
++            return Threshold::Always;
++        }
++        let (low, high) = self.bounds(abs_x);
++        // If the true scaled mass straddles an integer, using the lower floor
++        // loses less than two units, already charged in the distance bound.
++        assert!(
++            high >= low && Integer::from(&high - &low) <= 1,
++            "Gaussian acceptance interval was not certified"
++        );
++        let digits = low.to_digits::<u64>(Order::Lsf);
++        assert!(digits.len() <= 4);
++        let mut limbs = [0; 4];
++        limbs[..digits.len()].copy_from_slice(&digits);
++        Threshold::Fixed(limbs)
++    }
++
++    fn accepts(threshold: &Threshold, words: [u64; 4]) -> bool {
++        match threshold {
++            Threshold::Always => true,
++            Threshold::Fixed(t) => {
++                for j in (0..4).rev() {
++                    if words[j] < t[j] {
++                        return true;
++                    }
++                    if words[j] > t[j] {
++                        return false;
++                    }
++                }
++                false
++            }
++        }
++    }
++
++    /// Returns an integer in [-8s, 8s] under the certified truncated law.
++    /// A failed proposal is resampled internally; it is not a decoding failure.
++    pub fn sample_signed(&self, rng: &mut ThreadRng) -> i64 {
++        if let Some(cdf) = &self.cdf {
++            // Exact sampling from the integer weights used by rejection below.
++            // Rejection against the total avoids any modulo bias.
++            loop {
++                let mut value = [
++                    rng.next_u64(),
++                    rng.next_u64(),
++                    rng.next_u64(),
++                    rng.next_u64(),
++                    rng.next_u64(),
++                ];
++                value[4] &= cdf.high_mask;
++                if !less5(&value, &cdf.total) {
++                    continue;
++                }
++                let index = cdf.cumulative.partition_point(|c| !less5(&value, c));
++                return index as i64 - self.cutoff as i64;
++            }
++        }
++        loop {
++            let proposed = self.proposal.sample(rng) as i64 - self.cutoff as i64;
++            let abs_x = proposed.unsigned_abs();
++            let threshold = self.threshold(abs_x);
++            if threshold == Threshold::Always {
++                return proposed;
++            }
++            let words = [
++                rng.next_u64(),
++                rng.next_u64(),
++                rng.next_u64(),
++                rng.next_u64(),
++            ];
++            if Self::accepts(&threshold, words) {
++                return proposed;
++            }
++        }
++    }
++}
++
++impl DGS for JointGaussian {
++    /// Requires an integer power-of-two width and an unambiguous centered lift.
++    /// Panics if these requirements or a probability-interval check fail.
++    fn init(s: f64, mod_q: u64) -> Self {
++        assert!(s.is_finite() && s >= 16.0 && s <= (1u64 << 48) as f64);
++        let width = s as u64;
++        assert_eq!(width as f64, s);
++        assert!(
++            width.is_power_of_two(),
++            "profile Gaussian width must be a power of two"
++        );
++        let cutoff = 8 * width;
++        assert!(
++            cutoff < mod_q / 2,
++            "truncation must have an unambiguous centered lift"
++        );
++        let mut this = Self {
++            width,
++            modulus: mod_q,
++            cutoff,
++            proposal: Uniform::new_inclusive(0, 2 * cutoff).unwrap(),
++            cdf: None,
++            pi_low: Float::with_val_round(PRECISION, Constant::Pi, Round::Down).0,
++            pi_high: Float::with_val_round(PRECISION, Constant::Pi, Round::Up).0,
++        };
++        if cutoff <= 4096 {
++            let table: Vec<_> = (0..=cutoff).map(|x| this.threshold(x)).collect();
++            let mut sum = Integer::from(0);
++            let mut cumulative = Vec::new();
++            for x in -(cutoff as i64)..=cutoff as i64 {
++                let mass = match &table[x.unsigned_abs() as usize] {
++                    Threshold::Always => Integer::from(1) << PROB_BITS,
++                    Threshold::Fixed(words) => Integer::from_digits(words, Order::Lsf),
++                };
++                sum += mass;
++                cumulative.push(limbs5(&sum));
++            }
++            let high_bits = sum.significant_bits() - 256;
++            assert!(high_bits > 0 && high_bits < 64);
++            this.cdf = Some(IntegerCdf {
++                cumulative,
++                total: limbs5(&sum),
++                high_mask: (1u64 << high_bits) - 1,
++            });
++        }
++        this
++    }
++
++    fn sample(&self, rng: &mut ThreadRng) -> u64 {
++        let value = self.sample_signed(rng);
++        if value < 0 {
++            self.modulus - value.unsigned_abs()
++        } else {
++            value as u64
++        }
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    const Q: u64 = 281_474_976_694_273;
++
++    #[test]
++    fn probability_thresholds_are_certified_and_symmetric() {
++        for width in [16u64, 1 << 36] {
++            let sampler = JointGaussian::init(width as f64, Q);
++            let points: Vec<u64> = if width == 16 {
++                (1..=8 * width).collect()
++            } else {
++                vec![
++                    1,
++                    width / 4,
++                    width / 2,
++                    width,
++                    2 * width,
++                    4 * width,
++                    8 * width,
++                ]
++            };
++            for x in points {
++                let (lo, hi) = sampler.bounds(x);
++                assert!(Integer::from(&hi - &lo) <= 1);
++                assert_eq!(
++                    sampler.threshold(x),
++                    sampler.threshold((-(x as i64)).unsigned_abs())
++                );
++            }
++        }
++    }
++
++    #[test]
++    fn strict_comparison_handles_zero_and_equality() {
++        assert!(!JointGaussian::accepts(&Threshold::Fixed([0; 4]), [0; 4]));
++        assert!(!JointGaussian::accepts(
++            &Threshold::Fixed([1, 0, 0, 0]),
++            [1, 0, 0, 0]
++        ));
++        assert!(JointGaussian::accepts(
++            &Threshold::Fixed([1, 0, 0, 0]),
++            [0; 4]
++        ));
++        assert!(JointGaussian::accepts(&Threshold::Always, [u64::MAX; 4]));
++    }
++
++    #[test]
++    fn samples_are_centered_lifts_and_within_support() {
++        for width in [16u64, 1 << 36] {
++            let sampler = JointGaussian::init(width as f64, Q);
++            for _ in 0..128 {
++                let x = sampler.sample(&mut rand::rng());
++                assert!(x < Q && x.min(Q - x) <= 8 * width);
++            }
++        }
++    }
++}
+diff --git a/src/lib.rs b/src/lib.rs
+index a18b670..7084f27 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -35,6 +35,7 @@
+ //! benchmark the implementation.
+ 
+ pub mod dgs;
++pub mod joint_dgs;
+ pub mod mat;
+ pub mod ntt;
+ pub mod rbe;
+diff --git a/src/ntt.rs b/src/ntt.rs
+index 81f02a4..f53d68d 100644
+--- a/src/ntt.rs
++++ b/src/ntt.rs
+@@ -38,23 +38,20 @@ pub struct MatNTT {
+ impl MatNTT {
+     /// Computes the transform from coefficient representation to NTT form.
+     ///
+-    /// **WARNING:** On entry, the buffer holds the polynomial coefficients in standard order.
+-    /// On exit, the buffer holds the negacyclic NTT transform coefficients in bit reversed order.
++    /// Takes canonical coefficient residues in standard order and returns
++    /// transform coordinates in bit-reversed order. Coefficient ranges are not checked.
+     ///
+     /// Parameters:
+     /// - `matrix`: The matrix to transform to NTT form
+     /// - `ntt_plan`: The NTT-[`Plan`] that stores several information about NTT transform, etc.
+     ///
+-    /// ## Panics...
+-    /// - if the size of the polynomials mismatches the polynomials assumed in `ntt_plan`.
+-    /// - if a value larger than `q` of `ntt_plan` occurs.
++    /// # Panics
++    /// Panics if the polynomial size differs from the plan or the buffer cannot
++    /// be divided into polynomials of that size.
+     pub fn ntt(mut matrix: Mat, ntt_plan: &Plan) -> Self {
+         for chunk in (0..matrix.matrix.len()).step_by(matrix.d) {
+             ntt_plan.fwd(&mut matrix.matrix[chunk..chunk + matrix.d]);
+         }
+-        // Only required if no action is performed on it, which should never be the case
+-        // ntt_plan.normalize(&mut res);
+-
+         MatNTT {
+             matrix: matrix.matrix,
+             d: matrix.d,
+@@ -65,16 +62,17 @@ impl MatNTT {
+ 
+     /// Computes the inverse NTT transform, i.e. moves `self` from NTT form to coefficient representation.
+     ///
+-    /// **WARNING:** On entry, the buffer holds the negacyclic NTT transform coefficients in bit reversed order.
+-    /// On exit, the buffer holds the polynomial coefficients in standard order.
+-    /// Also, it's required that the input is `normalised` / reduced modulo the appropriate `q`.
++    /// Takes transform coordinates in bit-reversed order and returns coefficients
++    /// in standard order. The inverse is unscaled: a forward/inverse round trip
++    /// multiplies by the polynomial size `d`. Call [`Self::normalise`] once before
++    /// the inverse to remove that factor. Coefficient ranges are not checked.
+     ///
+     /// Parameters:
+     /// - `ntt_plan`: The NTT-[`Plan`] that stores several information about NTT transform, etc.
+     ///
+-    /// ## Panics...
+-    /// - if the size of the polynomials mismatches the polynomials assumed in `ntt_plan`.
+-    /// - if a value larger than `q` of `ntt_plan` occurs.
++    /// # Panics
++    /// Panics if the polynomial size differs from the plan or the buffer cannot
++    /// be divided into polynomials of that size.
+     pub fn inv_ntt(mut self, ntt_plan: &Plan) -> Mat {
+         for chunk in (0..self.matrix.len()).step_by(self.d) {
+             ntt_plan.inv(&mut self.matrix[chunk..chunk + self.d]);
+@@ -217,7 +215,10 @@ impl MatNTT {
+         &self.matrix[index..index + self.d]
+     }
+ 
+-    /// Normalises each polynomial, i.e. reduces it mod `q`.
++    /// Multiplies every transform coordinate by `d^{-1}` modulo the plan's `q`.
++    /// This supplies inverse-NTT scaling; it is not just modular reduction.
++    /// Apply it exactly once when an inverse transform should recover the usual
++    /// coefficient representation.
+     ///
+     /// Parameters:
+     /// - `ntt_plan`: The NTT-[`Plan`] that stores several information about NTT transform, etc.
+diff --git a/src/rbe.rs b/src/rbe.rs
+index 1497bcf..f847b58 100644
+--- a/src/rbe.rs
++++ b/src/rbe.rs
+@@ -9,13 +9,14 @@
+ //! Implementation of the Registration-Based Encryption scheme.
+ 
+ use crate::{
+-    dgs::{CdfSampler, DGS, MWSampler},
++    dgs::DGS,
++    joint_dgs::JointGaussian,
+     mat::Mat,
+     ntt::MatNTT,
+     utils::{compress, decompress, pack, unpack},
+ };
+ use concrete_ntt::prime64::Plan;
+-use rand::{Rng, SeedableRng, rng, rngs::StdRng};
++use rand::rng;
+ use rand_distr::Uniform;
+ use rayon::iter::{IntoParallelIterator, ParallelIterator};
+ use sled::{Batch, Db, Tree};
+@@ -26,8 +27,8 @@ use std::{mem::MaybeUninit, vec};
+ pub const D: usize = 256;
+ /// Modulus applied to each coefficient
+ pub const Q: u64 = 281_474_976_694_273;
+-/// Defines the matrix height of `A` and `B` among other vectors
+-pub const N: usize = 7;
++// N, PRUNE_CT_BY and SIGMA_TILDE come from build.rs (RBE_RANK, default 16).
++include!(concat!(env!("OUT_DIR"), "/profile.rs"));
+ /// Matrix width of B
+ pub const M_B: usize = N;
+ 
+@@ -41,38 +42,41 @@ pub const B: usize = 30;
+ pub const GADGET_BASE: u64 = 65_536;
+ /// Number of entries each gadget vector is pruned by
+ pub const PRUNE_GADGET_BY: usize = 1;
+-/// Number of lower-order bits to remove from each coefficient of the ciphertext
+-pub const PRUNE_CT_BY: usize = 16;
+ /// Number of lower-order bits to remove from each coefficient of the last vector of ciphertext
+-/// This only takes effect if the [`RBE`] instance has `prune_aggressively` set to `true`.
++/// Retained from the source prototype; aggressive pruning is disabled in this profile.
+ pub const PRUNE_LAST_CT_VECTOR_BY: usize = 43;
+ 
+-/// The LWE-secrets `x` and `r` are sampled in U(R_{SMALL_RND_D})
+-pub const SMALL_RND_B: u64 = 65_535; //should be odd to keep the distribution centered around 0
+-/// Gaussian parameter for most LWE-secrets and LWE-errors
++/// Inclusive sampling maximum; subtracting 32767 gives U(R_b)=(-b/2,b/2].
++pub const SMALL_RND_B: u64 = 65_535;
++/// Width of the small-noise law exp(-pi*x^2/sigma^2), not its standard deviation.
+ pub const SIGMA: f64 = 16.0;
+-/// Gaussian parameter for LWE-error of χ¯
+-pub const SIGMA_TILDE: f64 = 33_519_950_000.0;
++// For q = 1 mod 4, nearest-center decoding with ties to zero.
++fn decode_bit(v: u64) -> u64 {
++    u64::from(v > Q / 4 && v <= 3 * Q / 4)
++}
+ 
+ /// Implements the Registration-Based-Encryption scheme.
+ ///
+-/// The struct itself holds any public parameters for our [`RBE`] instance,
+-/// which depend on the choice of any static parameters chosen above.
++/// Holds the selected profile, transform plan and precomputed samplers.
++/// [`Self::setup`] returns the public matrices and initial registry state.
+ ///
+ /// Attributes:
+ /// - `prune_aggressively`: Determines whether the last vector of each ciphertext is pruned more aggressively
+ /// - `ntt_plan`: Contains values to perform NTT transformation and vice versa
+-/// - `m_a`: Width of matrix `A`
++/// - `m_a`: Width of each branch block of `A`; the full width is `K * m_a`
+ /// - `log_b_q`: Contains `ceil(log_{GADGET_BASE}(q))`
+ /// - `mat_g`: Gadget matrix in NTT form
+ /// - `dgs_sigma`: Discrete Gaussian sampler for vectors `r` and `e`
+ /// - `dgs_e_tilde`: Discrete Gaussian sampler for vector `e_tilde`
+ ///
+ /// # Example
++/// Run in a disposable working directory: this example uses and clears `registry_db`.
+ /// ```
+ /// use scalable_rbe::{rbe::{RBE, B, D, Q}, mat::Mat};
+ /// use rand::rng;
+ /// use rand_distr::Uniform;
++/// # use scalable_rbe::utils::drop_db;
++/// # drop_db();
+ ///
+ /// let id = "01210";
+ /// let t = rand::random_range(0..B);
+@@ -91,9 +95,13 @@ pub const SIGMA_TILDE: f64 = 33_519_950_000.0;
+ /// let dec = drbe.dec(&sk, t, &wit, &ct);
+ ///
+ /// assert_eq!(vec_m_t.get_entry(0, t), dec.matrix);
++/// # drop(reg);
++/// # drop_db();
+ /// ```
+ pub struct RBE<S: DGS, T: DGS> {
+     pub prune_aggressively: bool,
++    /// Bits dropped from each root coefficient in both encryption modes.
++    pub root_prune_by: usize,
+     pub ntt_plan: Plan,
+     pub m_a: usize,
+     pub log_b_q: usize,
+@@ -103,7 +111,8 @@ pub struct RBE<S: DGS, T: DGS> {
+ }
+ 
+ // Type definitions
+-type PP = ([u8; 32], [u8; 32]);
++/// Uniform public matrices `(A, B)` in NTT form; no setup seed is exposed.
++pub type PP = (MatNTT, MatNTT);
+ type ST = MatNTT;
+ #[allow(clippy::upper_case_acronyms)]
+ type REG = Db;
+@@ -113,16 +122,19 @@ type CT = Vec<Mat>;
+ #[allow(clippy::upper_case_acronyms)]
+ type WIT = Vec<MatNTT>;
+ 
+-impl RBE<CdfSampler, MWSampler> {
++impl RBE<JointGaussian, JointGaussian> {
+     /// Initialises the [`RBE`] scheme with a negacyclic NTT-[`Plan`] `X^D + 1 mod Q`
+     /// and `m_a := n * (ceil(log_{GADGET_BASE}(q)) - PRUNE_GADGET_BY)`.
+     /// Furthermore, it generates and stores the gadget matrix in NTT form and precomputes
+     /// any required tables for discrete Gaussian samplers.
+     ///
+-    /// Parameters:
+-    /// - `error_distribution`: Determines whether `r`, `e` and `e_tilde` vectors are
+-    ///   sampled discrete Gaussian or binomial
++    /// This joint profile uses certified Gaussian approximations and disables
++    /// the source prototype's aggressive final-component compression.
+     pub fn init(prune_aggressively: bool) -> Self {
++        assert!(
++            !prune_aggressively,
++            "aggressive pruning is outside the joint profile"
++        );
+         let ntt_plan = Plan::try_new(D, Q).unwrap();
+ 
+         // ceil(log_b(q))
+@@ -135,11 +147,12 @@ impl RBE<CdfSampler, MWSampler> {
+         let mat_g = Mat::gen_pruned_gadget(log_b_q, GADGET_BASE, PRUNE_GADGET_BY, N, D);
+         let mat_g = MatNTT::ntt(mat_g, &ntt_plan);
+ 
+-        let dgs_sigma = CdfSampler::init(SIGMA, Q);
+-        let dgs_e_tilde = MWSampler::init(SIGMA_TILDE, Q);
++        let dgs_sigma = JointGaussian::init(SIGMA, Q);
++        let dgs_e_tilde = JointGaussian::init(SIGMA_TILDE, Q);
+ 
+         Self {
+             prune_aggressively,
++            root_prune_by: 13,
+             ntt_plan,
+             m_a,
+             log_b_q,
+@@ -149,30 +162,26 @@ impl RBE<CdfSampler, MWSampler> {
+         }
+     }
+ 
+-    /// Initialises the matrices `A ← R_q^{n × k * m_A}` and `B ← R_q^{n × m_B}` with uniformly random values
+-    /// by choosing two seed of 256 bits each, from which `A` and `B` will be generated.
+-    /// Furthermore, it samples [`B`]-many random terminating vectors `y_t^{term} ← R_q^{n}`.
+-    /// It inserts these in NTT form in the state `st` and the roots of each tree of the
+-    /// registry `reg[t, ∈] = y_t^{term}`.
+-    /// Last, but not least, it saves the NTT-form of `-G^{-1}(y_t^{term})` in `reg[t, term]`.
++    /// Samples explicit uniform matrices `A ∈ R_q^{n × K m_A}` and `B ∈ R_q^{n × m_B}`.
++    /// The returned state contains every empty-tree terminator, so encryption can
++    /// run before registration. The registry stores these roots and their
++    /// negative gadget decompositions in NTT form.
++    ///
++    /// # Panics
++    /// Requires a fresh or empty `registry_db` in the working directory. An
++    /// existing nonempty registry is rejected before any stored record is changed.
++    /// Opening or writing the database can also fail.
+     pub fn setup(&self) -> (PP, ST, REG) {
+-        let mut seed_a = [0; 32];
+-        let mut seed_b = [0; 32];
+-        rng().fill_bytes(&mut seed_a);
+-        rng().fill_bytes(&mut seed_b);
+-
+-        // A ← R_q^{n × k * m_A}
+-        // let mat_a = MatNTT::sample_uniform(D, N, K * self.m_a, Q, &mut StdRng::from_seed(seed_a));
+-        // // B ← R_q^{n × m_B}
+-        // let mat_b = MatNTT::sample_uniform(D, N, M_B, Q, &mut StdRng::from_seed(seed_b));
++        let mat_a = MatNTT::sample_uniform(D, N, K * self.m_a, Q, &mut rng());
++        let mat_b = MatNTT::sample_uniform(D, N, M_B, Q, &mut rng());
+ 
+         // pp = (A, B)
+-        // st = empty list
+-        let st = MatNTT {
+-            matrix: vec![],
+-            d: 0,
+-            nr_rows: 0,
+-            nr_columns: 0,
++        // The initial public state contains all empty-tree terminators.
++        let mut st = MatNTT {
++            matrix: Vec::with_capacity(B * N * D),
++            d: D,
++            nr_rows: N,
++            nr_columns: B,
+         };
+         // reg = empty dictionary
+         let reg = sled::Config::default()
+@@ -182,11 +191,19 @@ impl RBE<CdfSampler, MWSampler> {
+             .use_compression(false)
+             .open()
+             .expect("Failed to open database.");
++        assert!(
++            reg.tree_names().iter().all(|name| reg
++                .open_tree(name)
++                .expect("Failed to inspect registry.")
++                .is_empty()),
++            "setup requires a fresh registry; existing records were not changed"
++        );
+ 
+         for t in 0..B {
+             // y_t^{term} ← R_q^{n}
+             let vec_t_term = Mat::sample_uniform(D, N, 1, &Uniform::new(0, Q).unwrap(), &mut rng());
+             let ntt_vec_t_term = MatNTT::ntt(vec_t_term.clone(), &self.ntt_plan);
++            st.matrix.extend_from_slice(&ntt_vec_t_term.matrix);
+             let mut decomp_vec_t_term =
+                 vec_t_term.pruned_binary_decomp(self.log_b_q, GADGET_BASE, PRUNE_GADGET_BY, Q);
+             decomp_vec_t_term.negate(Q);
+@@ -201,21 +218,21 @@ impl RBE<CdfSampler, MWSampler> {
+                 .unwrap();
+         }
+ 
+-        ((seed_a, seed_b), st, reg)
++        ((mat_a, mat_b), st, reg)
+     }
+ 
+-    /// Generates the key-pair `(pk, sk)` with short secret key `x ← U(R_b^{m_A})`
++    /// Generates the key-pair `(pk, sk)` with short secret key `x ← U(R_b^{m_B})`
+     /// and LWE sample `y := B * x + e^*` with `e^* ← U(R_b^n)` as its public key.
+     ///
+-    /// To keep the registry `reg` consistent, this algorithm pre-generates `-G^{-1}(y)`
+-    /// and registers its public key as this value in NTT form.
++    /// Returns the public encoding `-G^{-1}(y)` in NTT form, as expected by
++    /// [`Self::update`]; generating a key does not register it.
+     ///
+     /// Parameters:
+-    /// - `pp`: Public parameters containing the seeds to generate matrices `A` and `B`
++    /// - `pp`: Explicit public matrices `A` and `B`
+     pub fn keygen(&self, pp: &PP) -> (PK, SK) {
+-        let mat_b = MatNTT::sample_uniform(D, N, M_B, Q, &mut StdRng::from_seed(pp.1));
++        let mat_b = &pp.1;
+ 
+-        // x ← D^{R_q^{m_A}, s}
++        // x ← U(R_b^{m_B}), with coefficient support (-b/2,b/2].
+         let vec_x = Mat::sample_small(
+             D,
+             M_B,
+@@ -225,7 +242,7 @@ impl RBE<CdfSampler, MWSampler> {
+             Q,
+             &mut rng(),
+         );
+-        // e^* ← D^{R_q^n, e}
++        // e^* ← U(R_b^n), with the same coefficient support.
+         let vec_e_star = Mat::sample_small(
+             D,
+             N,
+@@ -250,21 +267,23 @@ impl RBE<CdfSampler, MWSampler> {
+ 
+         let ntt_decomp_res = MatNTT::ntt(decomp_res, &self.ntt_plan);
+ 
+-        // pk = y, sk = x
++        // pk is the negative gadget decomposition of y; sk = x.
+         (ntt_decomp_res, ntt_vec_x)
+     }
+ 
+     /// Encrypts a message `vec_m_t ∈ R_{0,1}^{1 x B}` with respect to the identity `id`.
+-    /// The resulting ciphertext will be compressed by dropping [`D`] lower-order bits of each entry.
++    /// Drops `root_prune_by` bits from root coefficients and [`PRUNE_CT_BY`]
++    /// bits from all other coefficients.
+     ///
+     /// Parameters:
+-    /// - `pp`: Public parameters containing the seeds to generate the matrices `A` and `B`
++    /// - `pp`: Explicit public matrices `A` and `B`
+     /// - `st`: The state containing the digests from each SIS-hash-tree
+-    /// - `id`: The identity string to encrypt to, it's required to be of arity `K`
++    /// - `id`: Nonempty identity of at most 162 digits in radix `K`
+     /// - `vec_m_t`: Transposed message vector of size `R_{0,1}^{1 x B}`
+     ///
+-    /// ## Panics ...
+-    /// - if `vec_m_t` does not have size `R_{0,1}^{1 x B}`.
++    /// # Panics
++    /// Rejects unsupported compression or identity depth. Invalid identity digits
++    /// or malformed matrix inputs may also panic; this is not a validating API.
+     pub fn enc(&self, pp: &PP, st: &ST, id: &str, vec_m_t: Mat) -> CT {
+         // ℓ := |id|
+         let l = id.len();
+@@ -300,7 +319,7 @@ impl RBE<CdfSampler, MWSampler> {
+         let vec_e_l_t = Mat::sample_disc_gauss(D, 1, M_B, &self.dgs_sigma, &mut rng());
+ 
+         // e¯ ←$ χ¯^T
+-        // error term s_e is a guess here, not determined according to the document
++        // Certified approximation to D_{R,sigma_tilde} for the joint profile.
+         let vec_e_tilde_t =
+             Mat::sample_disc_gauss(D, 1, st.nr_columns, &self.dgs_e_tilde, &mut rng());
+ 
+@@ -317,21 +336,23 @@ impl RBE<CdfSampler, MWSampler> {
+     }
+ 
+     /// Enables encryption of a message `vec_m_t ∈ R_{0,1}^{1 x B}` with respect to the identity `id`
+-    /// with pre-generated randomness. The resulting ciphertext will be compressed by dropping [`D`]
+-    /// lower-order bits of each entry.
++    /// with supplied randomness and the same codec as [`Self::enc`].
++    /// All NTT inputs must use the ordinary forward-transform representation;
++    /// the three output paths normalize exactly once before inverse transformation.
+     ///
+     /// Parameters:
+-    /// - `pp`: Public parameters containing the seeds to generate the matrices `A` and `B`
++    /// - `pp`: Explicit public matrices `A` and `B`
+     /// - `st`: The state containing the digests from each SIS-hash-tree
+-    /// - `id`: The identity string to encrypt to, it's required to be of arity `K`
++    /// - `id`: Nonempty identity of at most 162 digits in radix `K`
+     /// - `vec_m_t`: Transposed message vector of size `R_{0,1}^{1 x B}`
+-    /// - `vecs_r_j_t`: 163 LWE-secrets for path to `id` of size `R_q^{1 x N}` in NTT form
+-    /// - `vecs_e_j_t`: 162 LWE-errors for path to `id` of size `R_q^{1 x k * m_A}`
++    /// - `vecs_r_j_t`: `|id| + 1` LWE secrets of size `R_q^{1 x N}` in NTT form
++    /// - `vecs_e_j_t`: `|id|` LWE errors of size `R_q^{1 x K m_A}`
+     /// - `vec_e_l_t`: LWE-error for leaf of path to `id` of size `R_q^{1 x m_B}`
+     /// - `vec_e_tilde_t`: LWE-error to hide message of size `R_q^{1 x B}`
+     ///
+-    /// ## Panics ...
+-    /// - if `vec_m_t` does not have size `R_{0,1}^{1 x B}`.
++    /// # Panics
++    /// Rejects unsupported compression or identity depth. Invalid identity digits
++    /// or malformed matrix inputs may also panic; this is not a validating API.
+     #[allow(clippy::too_many_arguments)]
+     pub fn enc_wo_randomness(
+         &self,
+@@ -344,9 +365,17 @@ impl RBE<CdfSampler, MWSampler> {
+         vec_e_l_t: &Mat,
+         vec_e_tilde_t: &Mat,
+     ) -> CT {
++        assert!(
++            !self.prune_aggressively && self.root_prune_by <= 13,
++            "compression is outside the joint profile"
++        );
++        assert!(
++            !id.is_empty() && id.len() <= 162,
++            "identity depth is outside the joint profile"
++        );
+         let ntt_plan = self.ntt_plan.clone();
+-        let mat_a = MatNTT::sample_uniform(D, N, K * self.m_a, Q, &mut StdRng::from_seed(pp.0));
+-        let mat_b = MatNTT::sample_uniform(D, N, M_B, Q, &mut StdRng::from_seed(pp.1));
++        let mat_a = &pp.0;
++        let mat_b = &pp.1;
+ 
+         // Take string of `id` and map it to numbers w.r.t. `k`, i.e. id arity, which should be close to `e`
+         let id: Vec<u32> = id.chars().map(|c| c.to_digit(K as u32).unwrap()).collect();
+@@ -391,11 +420,21 @@ impl RBE<CdfSampler, MWSampler> {
+ 
+                 // c_j^t = r_j^T * A + r_{j+1}^T * (i_id_j^t ⊗ G˜) + e_j^t
+                 ntt_vec_c_j_t.add_assign(&ntt_vec_r_j_times_g);
++                // Inverse NTT is unnormalized; apply its factor exactly once.
++                ntt_vec_c_j_t.normalise(&self.ntt_plan);
+                 let mut vec_c_j_t = ntt_vec_c_j_t.inv_ntt(&self.ntt_plan);
+                 vec_c_j_t.add_assign(&vecs_e_j_t[j], Q);
+ 
+                 // Drop lower-order bits of ciphertext
+-                compress(&mut vec_c_j_t.matrix, PRUNE_CT_BY, Q);
++                compress(
++                    &mut vec_c_j_t.matrix,
++                    if j == 0 {
++                        self.root_prune_by
++                    } else {
++                        PRUNE_CT_BY
++                    },
++                    Q,
++                );
+                 vec_c_j_t
+             })
+             .collect();
+@@ -403,25 +442,27 @@ impl RBE<CdfSampler, MWSampler> {
+         // e_ℓ ← χ_e^{m_B} given by parameter vec_e_l_t
+ 
+         // c_l^t = r_l^t * B + e_l^t
+-        let mut c_l_t = vecs_r_j_t[l].mul(&mat_b, &self.ntt_plan).inv_ntt(&ntt_plan);
++        let mut ntt_c_l_t = vecs_r_j_t[l].mul(&mat_b, &self.ntt_plan);
++        ntt_c_l_t.normalise(&self.ntt_plan);
++        let mut c_l_t = ntt_c_l_t.inv_ntt(&ntt_plan);
+         c_l_t.add_assign(vec_e_l_t, Q);
+ 
+         compress(&mut c_l_t.matrix, PRUNE_CT_BY, Q);
+         result.push(c_l_t);
+ 
+-        // e¯ ←$ χ¯^T given by parameter vec_e_tilde_t - specific for 2 now
++        // Encode each ordinary bit at 0 or floor(q/2).
+         vec_m_t.mul_scalar(Q / 2);
+ 
+         // d^t = r_0^t * Y_T + e¯^t + floor(q/p) * m^t
+         // let vec_d_t =
+         //     &vecs_r_j_t[0] * mat_y_t + vec_e_tilde_t + self.modulus.get_q().div_floor(P) * vec_m_t;
+-        let mut vec_d_t = vecs_r_j_t[0]
+-            .mul(mat_y_t, &self.ntt_plan)
+-            .inv_ntt(&ntt_plan);
++        let mut ntt_d_t = vecs_r_j_t[0].mul(mat_y_t, &self.ntt_plan);
++        ntt_d_t.normalise(&self.ntt_plan);
++        let mut vec_d_t = ntt_d_t.inv_ntt(&ntt_plan);
+         vec_d_t.add_assign(vec_e_tilde_t, Q);
+         vec_d_t.add_assign(&vec_m_t, Q);
+ 
+-        // drop D lower order bits of each entry
++        // Use the same message-block codec in both modes.
+         compress(
+             &mut vec_d_t.matrix,
+             if self.prune_aggressively {
+@@ -436,18 +477,28 @@ impl RBE<CdfSampler, MWSampler> {
+         result
+     }
+ 
+-    /// Decrypts the ciphertext contained in the `t`-th entry of `ct`.
++    /// Decrypts the ordinary message for subregistry `t`.
++    /// Rounding always returns bits; it does not authenticate or reject a ciphertext.
+     ///
+     /// Parameters:
+     /// - `sk`: The short secret key, also denoted by `vec_x`
+     /// - `t`: Denotes the entry of the ciphertext that should be decrypted, i.e.
+     ///   `t` Defines the tree `t` that the identity is currently in
+     /// - `wit`: denotes the witness containing `|id|`-many vectors
+-    /// - `ct`: a ciphertext of length [`B`]
++    /// - `ct`: `|id|` path blocks, one leaf block and one message block
+     ///
+-    /// ## Panics ...
+-    /// - if `t >= B`.
++    /// # Panics
++    /// Rejects unsupported compression or witness depth. An invalid subregistry
++    /// index or malformed ciphertext may also panic.
+     pub fn dec(&self, sk: &SK, t: usize, wit: &WIT, ct: &CT) -> Mat {
++        assert!(
++            !self.prune_aggressively && self.root_prune_by <= 13,
++            "compression is outside the joint profile"
++        );
++        assert!(
++            !wit.is_empty() && wit.len() <= 162,
++            "witness depth is outside the joint profile"
++        );
+         let mut mu_bar = Mat {
+             matrix: ct.last().unwrap().get_entry(0, t).to_vec(),
+             d: D,
+@@ -468,7 +519,15 @@ impl RBE<CdfSampler, MWSampler> {
+         let mut ntt_mu_bar = MatNTT::ntt(mu_bar, &self.ntt_plan);
+         for j in 0..wit.len() {
+             let mut ct_j = ct[j].clone();
+-            decompress(&mut ct_j.matrix, PRUNE_CT_BY, Q);
++            decompress(
++                &mut ct_j.matrix,
++                if j == 0 {
++                    self.root_prune_by
++                } else {
++                    PRUNE_CT_BY
++                },
++                Q,
++            );
+ 
+             let tmp = MatNTT::ntt(ct_j, &self.ntt_plan).mul(&wit[j], &self.ntt_plan);
+             ntt_mu_bar.sub_assign(&tmp, Q); // order of ct and wit might differ
+@@ -482,21 +541,7 @@ impl RBE<CdfSampler, MWSampler> {
+ 
+         let mu_bar = ntt_mu_bar.inv_ntt(&self.ntt_plan);
+ 
+-        // return ⌊p/q · µ¯⌉ mod p - specific to p = 2
+-        // this introduces further noise by converting to f64 and back
+-        let q_over_4 = Q / 4;
+-        let three_q_over_4 = (Q * 3) / 4;
+-        let mat_vec = mu_bar
+-            .matrix
+-            .iter()
+-            .map(|&v| {
+-                if v >= q_over_4 && v < three_q_over_4 {
+-                    1
+-                } else {
+-                    0
+-                }
+-            })
+-            .collect();
++        let mat_vec = mu_bar.matrix.iter().map(|&v| decode_bit(v)).collect();
+         Mat {
+             matrix: mat_vec,
+             d: D,
+@@ -512,13 +557,15 @@ impl RBE<CdfSampler, MWSampler> {
+     /// Updates an existing public key or inserts a new one into the [`K`]-ary tree identified by `t`.
+     /// It ensures that any registered identity is always capable of generating a witness to decrypt
+     /// ciphertexts addressed to it.
+-    /// This implementation assumes that all identities are of length `162` and [`K`]-ary.
++    /// Callers supply prefix-free, nonempty [`K`]-ary identities of length at
++    /// most 162 and public encodings from [`Self::keygen`]. This low-level API
++    /// does not validate arbitrary registration encodings or identity prefixes.
+     ///
+     /// Parameters:
+     /// - `reg`: Registry containing all [`K`]-ary trees with all public keys to generate the state and witnesses
+-    /// - `pp`: Public parameters containing the seed to generate the matrices `A` and `B`
++    /// - `pp`: Explicit public matrices `A` and `B`
+     /// - `t`: Index defining the tree to update / insert `pk` in
+-    /// - `id`: Identity that is updated in the tree `t` of length 162
++    /// - `id`: Identity to update in tree `t`
+     /// - `pk`: New public key
+     pub fn update(&self, reg: &REG, pp: &PP, t: usize, id: &str, pk: &PK) -> ST {
+         let tree_t = reg.open_tree(format!("{t}")).unwrap();
+@@ -528,10 +575,7 @@ impl RBE<CdfSampler, MWSampler> {
+         // if pk = ⊥ - we assume that pk = ⊥ is denoted by any dimension-defficient vector
+         // In an RBE, a user can't remove its key - otherwise we couldn't keep our witness update requirement below log(N)
+ 
+-        // assert no leaf from reg[t, ϵ] to reg[t, id]
+-        // Since we're implementing an RBE and our `id` will be hashed to a 162 K-ary
+-        // digest, all identities will have length 162 and always be a leaf, i.e.
+-        // this check is not required
++        // Callers ensure prefix-free identities; the source uses fixed-length hashes.
+ 
+         // reg[t, id] := pk
+ 
+@@ -579,12 +623,12 @@ impl RBE<CdfSampler, MWSampler> {
+     /// Parameters:
+     /// - `reg`: Registry containing all [`K`]-ary trees with all public keys to generate the state and witnesses
+     /// - `tree_t`: Pointer to the tree `t` to update
+-    /// - `pp`: Public parameters containing the seed to generate the matrices `A` and `B`
++    /// - `pp`: Explicit public matrices `A` and `B`
+     /// - `id`: Identity that is updated in the tree `t`
+     /// - `pk`: The public key of `id`
+     /// - `batch`: A [`Batch`] to collect all database writes of `reg`
+     fn tree_update(&self, tree_t: &Tree, pp: &PP, id: &str, pk: &PK, batch: &mut Batch) {
+-        let mat_a = MatNTT::sample_uniform(D, N, K * self.m_a, Q, &mut StdRng::from_seed(pp.0));
++        let mat_a = &pp.0;
+ 
+         let term_ivec = tree_t.get(b"term").unwrap().unwrap();
+         let term_vec = unpack(&term_ivec, Q, self.m_a * D);
+@@ -716,19 +760,76 @@ impl RBE<CdfSampler, MWSampler> {
+     }
+ }
+ 
+-/// Executing multiple tests at once using `cargo test` can lead to issues as it executes the tests in a multi-threaded way, which can lead to in-
++// Run registry tests with --test-threads=1 from a disposable working directory.
+ #[cfg(test)]
+ mod test {
+-    use super::{B, D, Q};
++    use super::{B, D, Q, decode_bit};
+     use crate::{mat::Mat, ntt::MatNTT, rbe::RBE, utils::drop_db};
+     use rand::{distr::Uniform, rng, seq::IndexedRandom};
+ 
+     static IDS: &[&str] = &["012", "120", "000", "111", "2"];
+ 
++    #[test]
++    fn ordinary_decoder_matches_nearest_centers_at_boundaries() {
++        assert_eq!(Q % 4, 1);
++        let k = Q / 4;
++        for (residue, expected) in [
++            (0, 0),
++            (k - 1, 0),
++            (k, 0),
++            (k + 1, 1),
++            (Q / 2, 1),
++            (3 * k - 1, 1),
++            (3 * k, 1),
++            (3 * k + 1, 0),
++            (Q - 1, 0),
++        ] {
++            let d0 = residue.min(Q - residue);
++            let shifted = (residue + Q - Q / 2) % Q;
++            let d1 = shifted.min(Q - shifted);
++            assert_eq!(expected, u64::from(d1 < d0));
++            assert_eq!(decode_bit(residue), expected, "residue={residue}");
++        }
++    }
++
++    #[test]
++    fn a_setup_rejects_existing_registry_without_overwriting_it() {
++        drop_db();
++        let host = RBE::init(false);
++        let (_pp, _st, reg) = host.setup();
++        let tree = reg.open_tree("0").unwrap();
++        let original_root = tree.get("").unwrap().unwrap();
++        tree.insert("sentinel-child", b"preserve this existing record")
++            .unwrap();
++        reg.flush().unwrap();
++        drop(tree);
++        drop(reg);
++
++        let rejected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| host.setup()));
++        let reason = rejected.expect_err("fresh setup must reject existing records");
++        let reason = reason
++            .downcast_ref::<String>()
++            .map(String::as_str)
++            .or_else(|| reason.downcast_ref::<&str>().copied())
++            .unwrap_or("");
++        assert!(reason.contains("setup requires a fresh registry"));
++        let reg = sled::open("registry_db").unwrap();
++        let tree = reg.open_tree("0").unwrap();
++        assert_eq!(tree.get("").unwrap().unwrap(), original_root);
++        assert_eq!(
++            tree.get("sentinel-child").unwrap().unwrap().as_ref(),
++            b"preserve this existing record"
++        );
++        drop(tree);
++        drop(reg);
++        drop_db();
++    }
++
+     /// Enters a public key into the registry, encrypts and decrypts w.r.t. this public key
+     /// and checks whether decryption works.
+     #[test]
+     fn single_pk() {
++        drop_db();
+         let id = IDS.choose(&mut rand::rng()).unwrap();
+         let t = rand::random_range(0..B);
+ 
+@@ -750,6 +851,7 @@ mod test {
+             dec.matrix
+         );
+ 
++        drop(reg);
+         drop_db();
+     }
+ 
+@@ -757,6 +859,7 @@ mod test {
+     /// and checks whether decryption works.
+     #[test]
+     fn multi_pk() {
++        drop_db();
+         let drbe = RBE::init(false);
+         let (pp, mut st, reg) = drbe.setup();
+         let id = IDS.choose(&mut rand::rng()).unwrap();
+@@ -791,6 +894,7 @@ mod test {
+             dec.matrix
+         );
+ 
++        drop(reg);
+         drop_db();
+     }
+ 
+@@ -798,6 +902,7 @@ mod test {
+     /// and checks whether decryption works.
+     #[test]
+     fn full_length_id() {
++        drop_db();
+         let id = "0".repeat(162);
+         let t = 0;
+ 
+@@ -819,6 +924,7 @@ mod test {
+             dec.matrix
+         );
+ 
++        drop(reg);
+         drop_db();
+     }
+ 
+@@ -826,10 +932,11 @@ mod test {
+     #[ignore = "Expensive"]
+     #[test]
+     fn repeated_full_length_id() {
++        drop_db();
+         let id = "0".repeat(162);
+         let nr_iterations = 1_000;
+ 
+-        let drbe = RBE::init(true);
++        let drbe = RBE::init(false);
+         let (pp, mut st, reg) = drbe.setup();
+         let (pk, sk) = drbe.keygen(&pp);
+         let mut wits = vec![];
+@@ -856,6 +963,7 @@ mod test {
+ 
+         println!("{successful} out of {} were successful", B * nr_iterations);
+ 
++        drop(reg);
+         drop_db();
+     }
+ }
+diff --git a/src/utils.rs b/src/utils.rs
+index 494fbd8..6f62f24 100644
+--- a/src/utils.rs
++++ b/src/utils.rs
+@@ -43,7 +43,11 @@ pub fn compress(vector: &mut [u64], prune_by: usize, mod_q: u64) {
+     }
+ }
+ 
+-/// Decompresses a compressed `vector` by shifting bits `prune_by` number of bits to the left for each entry.
++/// Reconstructs canonical residues in `0..mod_q` from compressed symbols.
++///
++/// Requires `0 < mod_q` and `prune_by < 64`. For positive pruning, each input
++/// must be at most `mod_q >> prune_by`; with zero pruning, inputs must already
++/// lie in `0..mod_q`. This low-level helper does not validate its input domain.
+ ///
+ /// Parameters:
+ /// - `vector`: The vector with values to decompress
+@@ -61,6 +65,9 @@ pub fn decompress(vector: &mut [u64], prune_by: usize, mod_q: u64) {
+         } else {
+             *v <<= prune_by;
+         }
++        if *v == mod_q {
++            *v = 0;
++        }
+     }
+ }
+ 
+@@ -130,24 +137,45 @@ pub fn unpack(bytes: &[u8], q: u64, len: usize) -> Vec<u64> {
+ #[cfg(test)]
+ mod test_compression {
+     use crate::utils::{compress, decompress};
+-    use rand::{RngExt, rng};
+ 
+     #[test]
+     fn round_trip() {
+         let q = 257;
+         let prune_by = 4;
+ 
+-        let mut vector: Vec<u64> = (0..50).map(|_| rng().random_range(0..q)).collect();
++        let mut vector: Vec<u64> = (0..q).collect();
+         let cmp = vector.clone();
+ 
+         compress(&mut vector, prune_by, q);
+ 
+         decompress(&mut vector, prune_by, q);
+ 
+-        for i in 0..vector.len() {
+-            println!("{}", cmp[i] as i64 - vector[i] as i64);
+-            assert!(cmp[i] as i64 - vector[i] as i64 >= -2i64.pow(prune_by as u32 - 1));
+-            assert!(cmp[i] as i64 - vector[i] as i64 <= 2i64.pow(prune_by as u32 - 1));
++        for (&original, &reconstructed) in cmp.iter().zip(&vector) {
++            assert!(reconstructed < q);
++            let error = (original + q - reconstructed) % q;
++            assert!(error.min(q - error) <= 1 << (prune_by - 1));
++        }
++    }
++
++    #[test]
++    fn canonical_zero_at_profile_boundaries() {
++        let q = crate::rbe::Q;
++        for prune_by in [8, 13] {
++            let radius = 1u64 << (prune_by - 1);
++            let mut coefficients: Vec<_> = (q - radius..q).collect();
++            compress(&mut coefficients, prune_by, q);
++            decompress(&mut coefficients, prune_by, q);
++            assert!(coefficients.iter().all(|&x| x == 0));
++            // One more step around the circle must remain within the same error bound.
++            let original = [0, radius, radius + 1, q - radius - 1];
++            let mut reconstructed = original;
++            compress(&mut reconstructed, prune_by, q);
++            decompress(&mut reconstructed, prune_by, q);
++            for (x, y) in original.into_iter().zip(reconstructed) {
++                assert!(y < q);
++                let error = (x + q - y) % q;
++                assert!(error.min(q - error) <= radius);
++            }
+         }
+     }
+ }

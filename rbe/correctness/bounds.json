@@ -1,0 +1,40 @@
+{
+  "parameters": {
+    "q": 281474976694273,
+    "n": 16,
+    "phi": 256,
+    "depth": 162,
+    "batch": 30,
+    "sigma": 16,
+    "sigma_tilde": 68719476736,
+    "key_width": 524288,
+    "root_drop": 13,
+    "other_drop": 8,
+    "coefficient_error": 160,
+    "queries": 4294967296
+  },
+  "dimensions": {
+    "m_A": 32,
+    "m_B": 16,
+    "m_C": 64
+  },
+  "q_over_4_minus_1": 70368744173567.25,
+  "ordinary_noise_bound": 40132174413824.0,
+  "ordinary_compression_bound": 19911468384384.0,
+  "ordinary_total_bound": 60043642798208.0,
+  "ordinary_fraction_of_decoding_radius": 0.853271484426495,
+  "covert_noise_compression_bound": 18279380816032.0,
+  "covert_fraction_of_decoding_radius": 0.2597656250756045,
+  "log2_ordinary_failure_terms_across_queries": [
+    -219.0931094043915,
+    -4051.7355573997734,
+    -24531.753259401507
+  ],
+  "log2_covert_error_union_across_queries": -406.2360141827194,
+  "sampled_gaussian_coefficients_per_query": 4660736,
+  "log2_total_sampler_error_one_experiment_TV_2_neg_250": -195.84787363465747,
+  "log2_total_sampler_error_two_experiments_TV_2_neg_250": -194.84787363465747,
+  "ordinary_correctness_inequality_passes": true,
+  "covert_correctness_inequality_passes": true,
+  "scope": "Ideal Gaussian correctness plus stated per-coefficient sampler TV. Rank failure and hardness are separate."
+}

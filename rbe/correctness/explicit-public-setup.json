@@ -1,0 +1,12 @@
+{
+  "n": 16,
+  "A_coefficients": 393216,
+  "B_coefficients": 65536,
+  "terminator_coefficients": 122880,
+  "A_packed_bytes": 2359296,
+  "B_packed_bytes": 393216,
+  "terminator_packed_bytes": 737280,
+  "public_A_B_packed_bytes": 2752512,
+  "public_setup_including_terminators_packed_bytes": 3489792,
+  "public_setup_including_terminators_in_memory_u64_bytes": 4653056
+}

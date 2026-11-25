@@ -1,0 +1,212 @@
+Independent third-audit check: the ordinary RBE leaf transition
+
+Source inspection
+-----------------
+RBE author manuscript, Figure 3 (PDF page 8), Figure 4 (page 10),
+Theorem 5.5 (page 12), and Appendix A.3 (pages 18-19):
+https://kclpure.kcl.ac.uk/ws/portalfiles/portal/373075977/main.pdf
+
+Lai--Swarnakar--Woo, Example 1 and Theorem 3 (PDF pages 15-16):
+https://aaltodoc.aalto.fi/server/api/core/bitstreams/3059de93-bf66-48bb-866f-c471c831a980/content
+
+The following repairs the stated ordinary-message proof route only after
+restricting challenge registration as described below. It does not prove
+unrestricted common-message privacy when one honest public key occurs twice
+at the challenged identity. The channel root-only reductions do not use
+this leaf transition.
+
+Why the large sample budget is needed
+------------------------------------
+In the globally uniformized-key hybrid, every honest key-generation response
+is a uniform n-component ring vector. The adversary receives those vectors
+before choosing its challenge identity and selected subregistries. Thus a
+leaf reduction cannot select independent challenge columns after seeing the
+target; it must consistently embed all up-to-N_K responses in one LLWE
+matrix from the beginning of its simulation.
+
+Use an n-by-m matrix containing the public user-key matrix B_mat, the B
+terminator columns, and N_K key-response columns. Their independent uniform
+distribution matches that global key hybrid. The public tree matrix A can
+be sampled independently. The minimum direct leaf sample count is therefore
+
+    m_B + B + N_K = n + B + N_K.
+
+Using the same padded base bound as the other levels is convenient and
+conservative:
+
+    m_plus = k*m_A + B + N_K = 126 + N_K.
+
+Here m_B=n=16, k=3, m_A=32, B=30. The difference of 80 columns is padding;
+no new ciphertext component is added. With N_K=2^30, m_plus=1,073,741,950
+module samples, or 274,877,939,200 scalar samples. The ordinary root/lower
+steps still use only m_0=126 module samples.
+
+Adaptive simulation
+-------------------
+Assign a fresh pool-column index to every honest key-generation call and
+retain the underlying raw vector with its public response. The source API
+registers raw vectors y. The prototype instead returns prescribed negative
+gadget decompositions (in their prescribed NTT representation). Compare the
+canonical values returned by the relevant API, not hypothetical response
+handles. Map a registered value to its first already-issued matching response.
+In the prototype reduction, keep the corresponding raw pool vector privately;
+F=y-G_tilde*G_tilde^{-1}(y) has bounded coefficients. If several raw vectors
+encode to the same response, this representative remains consistent because
+y-F depends only on that encoding. No inversion of the lossy encoding is needed.
+Updates, witnesses and all non-target ciphertexts are
+computable from the supplied public matrix and independently sampled coins.
+After the adversary has selected the challenge, form the leaf leakage
+matrix from the resulting registry. This is permitted by semi-adaptive
+LLWE: the leakage matrix is selected after the public matrix is known but
+before the target LWE response vector is revealed. The whole capped pool
+also handles key-generation requests made after the challenge. Never reveal
+honest secret keys: the global uniformized-key hybrid cannot supply them.
+
+A1 is a value-based admissibility condition. At each ordinary challenge,
+every selected path must reach its designated terminator at or before the
+requested depth, or end at that depth in an honestly generated key leaf.
+The canonical public-key values at occupied selected leaves must be pairwise
+distinct and belong to the sequence of already-issued honest responses.
+Otherwise the challenge is rejected in every hybrid. This public
+predicate gives distinct canonical pool indices for the selected keys.
+Unoccupied slots use separate terminator indices. A1 is target-local:
+reusing a key at an unrelated identity does not itself violate it. The
+low-level prototype does not enforce A1.
+
+Do not condition setup or key generation on collision freedom. All columns
+are sampled independently, accidental value equalities remain possible,
+and the same challenge predicate is simulated in every hybrid. No separate
+collision-loss claim is required for this restricted game. In particular,
+the proof does not need to claim that the unrejected matrix is uniformly
+distributed conditional on A1; the LLWE reduction simulates rejection too.
+
+For ordinary privacy, the identity precondition also includes encryption
+queries. All registration and challenge identities lie in one prefix-free
+identity space; fixed-length encodings suffice. More locally, a challenge may be neither a strict prefix
+nor a strict extension of any registered identity in a selected subregistry.
+This ensures its final selected nodes are keys or terminators. The source's
+registered-only prefix-freeness statement (PDF page 10) and Figure 3 do not
+by themselves guarantee this for arbitrary challenge identities. The package
+therefore states this precondition explicitly, without asserting that the
+prototype enforces it. The retained tests use fixed-length identities.
+This additional ordinary-game
+restriction is not needed by the root-only channel reductions.
+
+The LLWE matrix is global, while the ciphertext randomness is fresh. For
+multiple adaptive ciphertext queries, apply one leaf hybrid per query and
+simulate the other queries. A1 must hold for every target query. This does
+not add another N_K factor to the LLWE advantage. The reduction resources
+do include simulating the complete capped key/ciphertext transcript and the
+larger sample pool; a small-sample estimate is not a bound at those resources.
+
+Explicit simulation of one adjacent transition
+----------------------------------------------
+Let M_plus=[B_mat | T_0 | ... | T_(B-1) | P_1 | ... | P_NK | Z],
+where Z contains the 80 unused padding columns at n=16. After the target
+registry is known, let P_ell select its final key/terminator pool coordinates;
+slots that terminated earlier select zero. Under A1, its nonzero selected
+indices are distinct and disjoint from the B_mat coordinates. The leaf LLWE
+instance returns
+
+  w = M_plus^T*r_ell + e_plus, or uniform w,
+  zeta = F_ell^T*r_ell + bar_e.
+
+Using the known earlier terms Gamma, the simulator sets
+
+  c_ell = w_B_mat,
+  d = Gamma + P_ell^T*w - zeta + Delta*m.
+
+The real branch supplies independent small errors at the selected coordinates;
+their difference with the symmetric large leakage noise has the previously
+charged convolution law. In the uniform branch those coordinates are fresh
+uniform pads, independent of c_ell and zeta. Slots that terminated earlier
+already have their earlier pads. This proves the required common endpoint.
+Adaptively selected matrix columns need not be conditionally independent:
+it is the uniform response vector, independent of the pre-response selection,
+whose distinct coordinates supply the pads.
+
+The source writes the large leakage noise as sum_j bar_e_j, where the
+supports partition selected slots by termination depth. Their full sum bar_e
+is one independent product D_bar_sigma vector across all selected slots.
+For an adjacent non-leaf transition j, regroup that full sum into
+
+  zeta_j = Lambda_j + bar_e,
+  Lambda_j = F_j^T*r_j + U_j^T*e_j,
+
+with F_0=0 and the source zero padding for terminated slots. All other terms
+are generated locally in that single reduction. The noise enters d only
+through its sum, so this is an exact regrouping of the game's distribution.
+Do not apply the standard LLWE theorem to Lambda_j+bar_e_j alone: bar_e_j
+can be zero on continuing slots where Lambda_j is not. This clarification
+preserves one convolution per selected slot and one LLWE call per level;
+it does not add H independent large noises or change encryption parameters.
+
+Leaf leakage and smoothing
+--------------------------
+Appendix A.3 gives L_ell=(F_{S,id};0): all leakage at the last level is on
+r_ell, and there is no error-leakage block. Each of its at most n*B entries
+has coefficient absolute value at most b/2. Padding the sample count and
+inserting the unused key-response columns add zero error-leakage rows.
+Therefore the correct leaf weight bound is w_leaf=n*B=480.
+
+For phi=256, b=2^16, sigma=16, sigma_star=12,
+sigma_tilde=2^36, bar_sigma^2=sigma_tilde^2-sigma^2, eps=2^-208, let
+
+    d = phi*(n+m_plus),
+    eta2 = log(2*d*(1+1/eps))/pi.
+
+LSW Example 1 requires sigma_star >= sqrt(2*eta2), using n+m rather than
+m, together with
+
+    w_leaf*phi^2*(b/2)^2/bar_sigma^2 + 1/sigma^2
+        <= 1/(2*eta2 + sigma_star^2).
+
+The independent script opus3-leaf-checks.py reports for the padded leaf:
+
+    d                       = 274,877,943,296
+    eta2                    = 54.49699327980072
+    sqrt(2*eta2)             = 10.440018513374458 < 12
+    left side               = 0.003913402557373047
+    right side              = 0.003952663118988465
+    left/right              = 0.9900673140023465 < 1.
+
+The former generic weight 7*n*B=3360 would instead give 1.0009246380257668,
+which fails. It must not be used to certify this enlarged leaf instance.
+The base 126-sample ordinary step retains ratio 0.961032457151613.
+
+Corrected two-endpoint bound
+----------------------------
+Let a_G bound rank-n Gaussian MLWE with m_0=126 module samples, and a_G_plus
+bound the same Gaussian MLWE family with m_plus=126+N_K module samples,
+both with secret/error D_12 and at the full respective reduction resources.
+Define them as advantage bounds allowing algorithms to ignore samples, so
+a_G_plus may be chosen at least a_G. Let a_key denote the unchanged
+bounded-key LWE advantage. With Q ciphertext queries, H=163, A1 at every
+query, no honest-key disclosure, and the previously stated sampler/model
+scope, the hybrid yields
+
+    D_branch <= N_K*a_key
+              + Q*(H-1)*a_G + Q*a_G_plus
+              + Q*(4*H*eps/(1-eps) + 16*B*eps_c).
+
+Both message branches reach the same uniformized-key, uniform-ciphertext
+endpoint. Triangle inequality consequently gives
+
+    Adv_ordinary <= 2*N_K*a_key
+                  + 2*Q*(H-1)*a_G + 2*Q*a_G_plus
+                  + 8*Q*H*eps/(1-eps) + 32*Q*B*eps_c.
+
+For varying challenge lengths, H-1 can be replaced by the sum of lengths
+divided by Q; H is simply the advertised common maximum. Padding the leaf
+can only weaken the assumption, not improve its computational guarantee.
+
+The coarser form 2*N_K*a_key+2*Q*H*a_G_plus plus the same statistical terms
+is also valid. The old numerical budget stays equal only if the separate
+assumed advantage cap 2^-192 explicitly covers a_G_plus at its enlarged
+sample count and full reduction resources. A cost estimate alone cannot
+establish that advantage cap. The old small-sample estimator result should
+not be relabeled as an execution on the enlarged leaf instance.
+
+This derivation uses A1, the identity precondition and the enlarged
+assumption. It does not silently retrofit that restriction to the
+unrestricted source BLE experiment, which admits duplicate selected keys.

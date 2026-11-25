@@ -1,0 +1,8 @@
+{
+  "depth": 16,
+  "one_public_residual_noise_bound": 9878424780928,
+  "two_public_residual_noise_bound": 19756849561856,
+  "q_over_4_minus_1": 70368744173567.25,
+  "decision_radius_sufficient": true,
+  "scope": "Termwise bound on the source Gaussian norm events, with the separately stated sampler allowance. Does not certify the original q/1024 diagnostic threshold."
+}

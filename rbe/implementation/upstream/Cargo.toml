@@ -1,0 +1,38 @@
+[package]
+name = "scalable-rbe"
+version = "0.1.1"
+edition = "2024"
+rust-version = "1.86" # due to criterion dependency
+description = "A prototype of a scalable Registration-Based Encryption scheme based on standard lattice assumptions"
+readme = "README.md"
+repository = "https://github.com/jnsiemer/scalable_rbe_prototype"
+license = "MPL-2.0"
+keywords = ["RBE", "prototype", "lattice", "cryptography"]
+categories = ["cryptography"]
+autobenches = false
+
+exclude = [
+    ".github/",
+    "estimator/",
+    "params/",
+]
+
+[dependencies]
+rand = { version = "0.10", features = ["unbiased"] }
+criterion = { version = "0.8", features = ["html_reports"] }
+rayon = "1.11.0"
+concrete-ntt = "0.2.0"
+rand_distr = "0.6"
+sled = "0.34.7"
+rug = { version = "1.30", default-features = false, features = ["float", "integer", "std"] }
+
+# The module rank comes from the RBE_RANK environment variable at build time (build.rs):
+# 16 by default (the joint profile), 7 for the authors' benchmark parameters, 8 to 15 for
+# hosts that keep the authors' rank 7 free after up to RBE_RANK - 7 constraints.
+
+[profile.bench]
+debug = true
+
+[[bench]]
+name = "benchmarks"
+harness = false

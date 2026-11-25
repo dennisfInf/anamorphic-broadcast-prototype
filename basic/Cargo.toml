@@ -1,0 +1,29 @@
+[package]
+name = "basic-anamorphic"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+# Bit views of the SHAKE256 key stream.
+bitvec = "1.1.1"
+# ChaCha12 streams for the per-chunk noise (the same generator as rand's StdRng).
+chacha20 = { version = "0.10.2", default-features = false, features = ["rng"] }
+# Command lines of the benchmark, the table tool and the statistics example.
+clap = { version = "4.6.7", features = ["derive"] }
+# Arithmetic modulo q (RustCrypto): reductions, modular add/sub/neg, inverses.
+crypto-bigint = { version = "0.7.10", default-features = false }
+rand = { version = "0.10.3", features = ["unbiased"] }
+rayon = "1.11.0"
+# GMP and MPFR: primality of q and the multiprecision floats of the noise table.
+rug = { version = "1.30.0", default-features = false, features = ["integer", "float", "std"] }
+sha3 = "0.10.8"
+serde = "1.0"
+serde_json = "1.0"
+
+[dev-dependencies]
+# Only the frozen reference implementation in tests/legacy uses the numerical normal sampler.
+rand_distr = "0.6.0"
+
+[lib]
+path = "src/lib.rs"

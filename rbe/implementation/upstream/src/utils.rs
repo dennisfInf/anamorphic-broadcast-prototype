@@ -1,0 +1,181 @@
+// Copyright 2026 Jan Niklas Siemer
+//
+// This file is part of scalable_rbe.
+//
+// scalable_rbe is free software: you can redistribute it and/or modify it under
+// the terms of the Mozilla Public License Version 2.0 as published by the
+// Mozilla Foundation. See <https://mozilla.org/en-US/MPL/2.0/>.
+
+//! Utility functions to (de-)compress and byte (de-)compose matrices.
+
+use std::{fs, path::Path};
+
+/// Ensures that there is no data
+pub fn drop_db() {
+    let path = "./registry_db";
+    if Path::new(path).exists() {
+        let _ = fs::remove_dir_all(path);
+    }
+}
+
+/// Compresses the given `vector` by removing / shifting lower order bits
+/// a `prune_by` number of bits to the right for each entry.
+///
+/// Parameters:
+/// - `vector`: The vector with values to compress
+/// - `prune_by`: Defines the number of lower order bits to shift / remove from each entry
+/// - `mod_q`: The modulus
+pub fn compress(vector: &mut [u64], prune_by: usize, mod_q: u64) {
+    if prune_by == 0 {
+        return;
+    }
+
+    let round_const = (1 << (prune_by - 1)) - 1;
+
+    for v in vector {
+        if *v > mod_q / 2 {
+            *v = mod_q - *v;
+            *v = (*v + round_const) >> prune_by;
+            *v = (mod_q >> prune_by) - *v;
+        } else {
+            *v = (*v + round_const) >> prune_by;
+        }
+    }
+}
+
+/// Reconstructs canonical residues in `0..mod_q` from compressed symbols.
+///
+/// Requires `0 < mod_q` and `prune_by < 64`. For positive pruning, each input
+/// must be at most `mod_q >> prune_by`; with zero pruning, inputs must already
+/// lie in `0..mod_q`. This low-level helper does not validate its input domain.
+///
+/// Parameters:
+/// - `vector`: The vector with values to decompress
+/// - `prune_by`: Defines the number of bits to shift left for each entry
+/// - `mod_q`: The modulus
+pub fn decompress(vector: &mut [u64], prune_by: usize, mod_q: u64) {
+    if prune_by == 0 {
+        return;
+    }
+    for v in vector {
+        if *v > (mod_q >> prune_by) / 2 {
+            *v = (mod_q >> prune_by) - *v;
+            *v <<= prune_by;
+            *v = mod_q - *v;
+        } else {
+            *v <<= prune_by;
+        }
+        if *v == mod_q {
+            *v = 0;
+        }
+    }
+}
+
+/// Byte-decomposes the [`u64`]-`values`.
+///
+/// Parameters:
+/// - `values`: The values to decompose into bytes
+/// - `q`: The largest value that can occur in `values`
+pub fn pack(values: &[u64], q: u64) -> Vec<u8> {
+    assert!(q > 1);
+
+    let bits = (64 - (q - 1).leading_zeros()) as usize;
+    let total_bits = values.len() * bits;
+    let total_bytes = total_bits.div_ceil(8);
+
+    let mut out = Vec::with_capacity(total_bytes);
+    let mut buffer: u64 = 0;
+    let mut buffer_bits = 0;
+
+    for &v in values {
+        debug_assert!(v < q);
+        buffer |= v << buffer_bits;
+        buffer_bits += bits;
+
+        while buffer_bits >= 8 {
+            out.push(buffer as u8);
+            buffer >>= 8;
+            buffer_bits -= 8;
+        }
+    }
+
+    if buffer_bits > 0 {
+        out.push(buffer as u8);
+    }
+
+    out
+}
+
+/// Composes a vector of [`u64`]-values from bytes.
+///
+/// Parameters:
+/// - `bytes`: The bytes to compose into [`u64`]
+/// - `q`: The largest value that occured before decomposing
+/// - `len`: Number of entries that was decomposed before
+pub fn unpack(bytes: &[u8], q: u64, len: usize) -> Vec<u64> {
+    let bits = (64 - (q - 1).leading_zeros()) as usize;
+    let mask = (1u64 << bits) - 1;
+
+    let mut values = Vec::with_capacity(len);
+    let mut buffer: u64 = 0;
+    let mut buffer_bits = 0;
+
+    for &b in bytes {
+        buffer |= (b as u64) << buffer_bits;
+        buffer_bits += 8;
+
+        while buffer_bits >= bits && values.len() < len {
+            values.push(buffer & mask);
+            buffer >>= bits;
+            buffer_bits -= bits;
+        }
+    }
+
+    values
+}
+
+#[cfg(test)]
+mod test_compression {
+    use crate::utils::{compress, decompress};
+
+    #[test]
+    fn round_trip() {
+        let q = 257;
+        let prune_by = 4;
+
+        let mut vector: Vec<u64> = (0..q).collect();
+        let cmp = vector.clone();
+
+        compress(&mut vector, prune_by, q);
+
+        decompress(&mut vector, prune_by, q);
+
+        for (&original, &reconstructed) in cmp.iter().zip(&vector) {
+            assert!(reconstructed < q);
+            let error = (original + q - reconstructed) % q;
+            assert!(error.min(q - error) <= 1 << (prune_by - 1));
+        }
+    }
+
+    #[test]
+    fn canonical_zero_at_profile_boundaries() {
+        let q = crate::rbe::Q;
+        for prune_by in [8, 13] {
+            let radius = 1u64 << (prune_by - 1);
+            let mut coefficients: Vec<_> = (q - radius..q).collect();
+            compress(&mut coefficients, prune_by, q);
+            decompress(&mut coefficients, prune_by, q);
+            assert!(coefficients.iter().all(|&x| x == 0));
+            // One more step around the circle must remain within the same error bound.
+            let original = [0, radius, radius + 1, q - radius - 1];
+            let mut reconstructed = original;
+            compress(&mut reconstructed, prune_by, q);
+            decompress(&mut reconstructed, prune_by, q);
+            for (x, y) in original.into_iter().zip(reconstructed) {
+                assert!(y < q);
+                let error = (x + q - y) % q;
+                assert!(error.min(q - error) <= radius);
+            }
+        }
+    }
+}

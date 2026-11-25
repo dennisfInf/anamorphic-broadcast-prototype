@@ -1,0 +1,8 @@
+# Machine-specific environments and generated files
+.venv/
+.runtime/
+**/__pycache__/
+*.py[cod]
+**/target/
+**/registry_db/
+.DS_Store

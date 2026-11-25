@@ -1,0 +1,22 @@
+[package]
+name = "rbe-anamorphic-review"
+version = "0.1.0"
+edition = "2024"
+# `cargo run` keeps running src/main.rs (the encryption benchmark).
+# src/bin/experiments.rs runs with `--bin experiments`.
+default-run = "rbe-anamorphic-review"
+license = "MPL-2.0"
+
+[dependencies]
+# The authors' scalable-RBE prototype at revision 5f1e741 with the rank-16 joint profile
+# of the paper's Sec. 7.2 applied (../n16-joint-profile.patch), vendored in ../upstream.
+# The unmodified crate has module rank 7, which leaves too little root rank for the
+# channel's constraints (see MIN_ROOT_RANK in src/lib.rs).
+scalable-rbe = { path = "../upstream" }
+rand = { version = "0.10", features = ["unbiased"] }
+rand_distr = "0.6"
+rayon = "1.11.0"
+serde_json = "1.0"
+
+# The host's module rank is set at build time by RBE_RANK (see ../upstream/build.rs and
+# MIN_ROOT_RANK in src/lib.rs), e.g. `RBE_RANK=9 cargo run --release --bin experiments`.
